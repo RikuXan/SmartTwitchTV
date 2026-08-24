@@ -72,6 +72,7 @@ import androidx.media3.common.Format;
 import androidx.media3.common.PlaybackException;
 import androidx.media3.common.PlaybackParameters;
 import androidx.media3.common.Player;
+import androidx.media3.common.Timeline;
 import androidx.media3.common.TrackGroup;
 import androidx.media3.common.TrackSelectionOverride;
 import androidx.media3.common.TrackSelectionParameters;
@@ -188,6 +189,8 @@ public class PlayerActivity extends Activity {
     private int mLowLatency = 0;
     private int mLowLatencyVod = 7;
     private boolean speedAdjustment = false;
+    private int CatchupBehindCounter = 0;
+    private final Timeline.Window CatchupWindow = new Timeline.Window();
     private boolean AlreadyStarted;
     private boolean onCreateReady;
     private boolean IsStopped;
@@ -624,7 +627,14 @@ public class PlayerActivity extends Activity {
                     )
                 )
                 .setLivePlaybackSpeedControl(
-                    new DefaultLivePlaybackSpeedControl.Builder().setFallbackMaxPlaybackSpeed(1.0f).setFallbackMinPlaybackSpeed(1.0f).build()
+                    new DefaultLivePlaybackSpeedControl.Builder()
+                        .setFallbackMaxPlaybackSpeed(1.0f)
+                        .setFallbackMinPlaybackSpeed(1.0f)
+                        //Default 500ms per rebuffer permanently ratchets the target offset up over long sessions
+                        .setTargetLiveOffsetIncrementOnRebufferMs(0)
+                        //Default 0.999 keeps one bad network patch raising the target for many minutes
+                        .setMinPossibleLiveOffsetSmoothingFactor(0.99f)
+                        .build()
                 )
                 .build();
 
@@ -845,23 +855,18 @@ public class PlayerActivity extends Activity {
         long LiveOffset = PlayerObj[PlayerObjPosition].player.getCurrentLiveOffset();
         long Offset = Duration - Position;
 
-        if (PlayerObj[PlayerObjPosition].LatencyOffSet == 0 && Offset > 0 && LiveOffset > (Offset + 3000)) { // 3000 minor extra offset as some streams LiveOffset maybe very close to Offset
-            PlayerObj[PlayerObjPosition].LatencyOffSet = LiveOffset - Offset;
-            //            Log.d("TAG1", "Duration " + Duration);
-            //            Log.d("TAG1", "Position " + Position);
-            //            Log.d("TAG1", "LiveOffset " + LiveOffset);
-            //            Log.d("TAG1", "LatencyOffSet " + PlayerObj[PlayerObjPosition].LatencyOffSet);
-            //            Log.d("TAG1", "LiveOffset " + (LiveOffset - PlayerObj[PlayerObjPosition].LatencyOffSet));
+        if (Offset <= 0) return Math.max(LiveOffset, 0);
 
+        long Corrected = LiveOffset - PlayerObj[PlayerObjPosition].LatencyOffSet;
+
+        //The real latency is always at least the distance to the window edge, below it the correction is stale
+        //10000 as anything that far over the window edge distance is beyond a real encode/CDN pipeline delay
+        if (Corrected < Offset || (PlayerObj[PlayerObjPosition].LatencyOffSet == 0 && LiveOffset > (Offset + 10000))) {
+            PlayerObj[PlayerObjPosition].LatencyOffSet = LiveOffset > (Offset + 10000) ? LiveOffset - Offset : 0;
+            Corrected = LiveOffset - PlayerObj[PlayerObjPosition].LatencyOffSet;
         }
 
-        LiveOffset -= PlayerObj[0].LatencyOffSet;
-
-        if (LiveOffset < 0) {
-            PlayerObj[0].LatencyOffSet = 0;
-        }
-
-        return LiveOffset;
+        return Math.max(Corrected, 0);
     }
 
     //Basic player position setting, for resume playback
@@ -1231,10 +1236,56 @@ public class PlayerActivity extends Activity {
                 () -> {
                     PlayerCurrentPosition = PlayerObj[0].player != null ? PlayerObj[0].player.getCurrentPosition() : 0L;
 
+                    LiveCatchupCheck();
                     GetCurrentPosition();
                 },
                 CurrentPositionTimeout
             );
+    }
+
+    //The speed based catch-up can only recover small gaps, when sustained too far behind jump back to the live edge
+    private void LiveCatchupCheck() {
+        if (
+            !speedAdjustment ||
+            mLowLatency == 0 ||
+            PlayerObj[0].player == null ||
+            PlayerObj[0].Type != 1 ||
+            !PlayerObj[0].IsPlaying ||
+            MultiStreamEnable
+        ) {
+            CatchupBehindCounter = 0;
+            return;
+        }
+
+        long Duration = PlayerObj[0].player.getDuration();
+        long Position = PlayerObj[0].player.getCurrentPosition();
+
+        if (Duration == C.TIME_UNSET || Duration <= 0 || Position <= 0) {
+            CatchupBehindCounter = 0;
+            return;
+        }
+
+        //Distance to the window edge, unlike getCurrentLiveOffset this isn't affected by EXT-X-PROGRAM-DATE-TIME desync
+        long BehindLiveEdge = Duration - Position;
+        long SeekThreshold = 10000L;
+
+        Timeline timeline = PlayerObj[0].player.getCurrentTimeline();
+        if (!timeline.isEmpty()) {
+            timeline.getWindow(PlayerObj[0].player.getCurrentMediaItemIndex(), CatchupWindow);
+            if (CatchupWindow.liveConfiguration != null && CatchupWindow.liveConfiguration.targetOffsetMs > 0) {
+                SeekThreshold = Math.max(8000L, CatchupWindow.liveConfiguration.targetOffsetMs * 3);
+            }
+        }
+
+        if (BehindLiveEdge > SeekThreshold) {
+            CatchupBehindCounter++;
+            if (CatchupBehindCounter >= 10) { //~5s behind the threshold at 500ms per check
+                CatchupBehindCounter = 0;
+                PlayerObj[0].player.seekToDefaultPosition();
+            }
+        } else {
+            CatchupBehindCounter = 0;
+        }
     }
 
     private void GetCurrentPositionSmall() {
