@@ -188,6 +188,7 @@ public class PlayerActivity extends Activity {
     private int mLowLatency = 0;
     private int mLowLatencyVod = 7;
     private int mLowLatencyTargetMs = 1000;
+    private float mUserPlaybackSpeed = 1f;
     private boolean speedAdjustment = false;
     private int CatchupBehindCounter = 0;
     private final Timeline.Window CatchupWindow = new Timeline.Window();
@@ -1268,9 +1269,10 @@ public class PlayerActivity extends Activity {
 
     //The media clock can echo the adjusted speed back into the user playback parameters, which
     //permanently disables that player's live speed gate (it requires user speed == 1f), reset it.
-    //Covers all players so PiP and multi stream ones recover too, live only, VODs may use user speeds
+    //Covers all players so PiP and multi stream ones recover too, live only, VODs may use user speeds.
+    //Only while the user chosen speed is 1f, a manual speed must not be fought
     private void LiveSpeedGateCheck() {
-        if (!speedAdjustment || mLowLatency == 0) return;
+        if (!speedAdjustment || mLowLatency == 0 || mUserPlaybackSpeed != 1f) return;
 
         for (PlayerObj obj : PlayerObj) {
             if (obj != null && obj.player != null && obj.Type == 1 && obj.player.getPlaybackParameters().speed != 1f) {
@@ -3495,6 +3497,7 @@ public class PlayerActivity extends Activity {
         @JavascriptInterface
         public void setPlaybackSpeed(float speed) {
             runOnUiThread(() -> {
+                mUserPlaybackSpeed = speed;
                 for (int i = 0; i < PlayerAccount; i++) {
                     if (PlayerObj[i].player != null) PlayerObj[i].player.setPlaybackParameters(new PlaybackParameters(speed));
                 }
