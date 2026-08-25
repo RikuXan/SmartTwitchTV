@@ -151,8 +151,8 @@ var Settings_value = {
         defaultValue: 1
     },
     ll_target: {
-        values: ['0.75s', '1s', '1.25s', '1.5s', '2s', '3s'],
-        defaultValue: 1
+        values: ['0.25s', '0.5s', '0.75s', '1s', '1.5s', '2s', '3s'],
+        defaultValue: 3
     },
     ttv_lolProxy: {
         //Migrated to dialog
