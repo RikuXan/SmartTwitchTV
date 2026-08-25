@@ -1258,11 +1258,25 @@ public class PlayerActivity extends Activity {
                         );
                     }
 
+                    LiveSpeedGateCheck();
                     LiveCatchupCheck();
                     GetCurrentPosition();
                 },
                 CurrentPositionTimeout
             );
+    }
+
+    //The media clock can echo the adjusted speed back into the user playback parameters, which
+    //permanently disables that player's live speed gate (it requires user speed == 1f), reset it.
+    //Covers all players so PiP and multi stream ones recover too, live only, VODs may use user speeds
+    private void LiveSpeedGateCheck() {
+        if (!speedAdjustment || mLowLatency == 0) return;
+
+        for (PlayerObj obj : PlayerObj) {
+            if (obj != null && obj.player != null && obj.Type == 1 && obj.player.getPlaybackParameters().speed != 1f) {
+                obj.player.setPlaybackParameters(PlaybackParameters.DEFAULT);
+            }
+        }
     }
 
     //The speed based catch-up can only recover small gaps, when sustained too far behind jump back to the live edge
@@ -1277,12 +1291,6 @@ public class PlayerActivity extends Activity {
         ) {
             CatchupBehindCounter = 0;
             return;
-        }
-
-        //The media clock can echo the adjusted speed back into the user playback parameters, which
-        //permanently disables the player's live speed gate (it requires user speed == 1f), reset it
-        if (PlayerObj[0].player.getPlaybackParameters().speed != 1f) {
-            PlayerObj[0].player.setPlaybackParameters(PlaybackParameters.DEFAULT);
         }
 
         long Duration = PlayerObj[0].player.getDuration();
