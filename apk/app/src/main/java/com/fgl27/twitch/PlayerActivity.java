@@ -191,6 +191,13 @@ public class PlayerActivity extends Activity {
     private boolean speedAdjustment = false;
     private int CatchupBehindCounter = 0;
     private final Timeline.Window CatchupWindow = new Timeline.Window();
+    private TwitchLivePlaybackSpeedControl MainSpeedControl;
+
+    private TwitchLivePlaybackSpeedControl NewSpeedControl(int PlayerObjPosition) {
+        TwitchLivePlaybackSpeedControl speedControl = new TwitchLivePlaybackSpeedControl();
+        if (PlayerObjPosition == 0) MainSpeedControl = speedControl;
+        return speedControl;
+    }
     private boolean AlreadyStarted;
     private boolean onCreateReady;
     private boolean IsStopped;
@@ -626,7 +633,7 @@ public class PlayerActivity extends Activity {
                         DeviceRam / PlayerObj[PlayerObjPosition].loadControlRamDivider
                     )
                 )
-                .setLivePlaybackSpeedControl(new TwitchLivePlaybackSpeedControl())
+                .setLivePlaybackSpeedControl(NewSpeedControl(PlayerObjPosition))
                 .build();
 
             PlayerObj[PlayerObjPosition].Listener = new PlayerEventListener(PlayerObjPosition);
@@ -1242,7 +1249,11 @@ public class PlayerActivity extends Activity {
                             " shown=" + getCurrentLiveOffset(0, dur, pos) +
                             " edgeDist=" + (dur - pos) +
                             " buf=" + PlayerObj[0].player.getTotalBufferedDuration() +
-                            " speed=" + PlayerObj[0].player.getPlaybackParameters().speed +
+                            " pp=" + PlayerObj[0].player.getPlaybackParameters().speed +
+                            " pos=" + pos +
+                            " ctlMin=" + (MainSpeedControl != null ? MainSpeedControl.getWindowedMinMs() : -1) +
+                            " ctlStallX=" + (MainSpeedControl != null ? MainSpeedControl.getStallExtraMs() : -1) +
+                            " ctlSpeed=" + (MainSpeedControl != null ? MainSpeedControl.getAdjustedSpeed() : -1) +
                             " target=" + target +
                             " lowLat=" + mLowLatency +
                             " targetMs=" + mLowLatencyTargetMs +
@@ -1269,6 +1280,12 @@ public class PlayerActivity extends Activity {
         ) {
             CatchupBehindCounter = 0;
             return;
+        }
+
+        //The media clock can echo the adjusted speed back into the user playback parameters, which
+        //permanently disables the player's live speed gate (it requires user speed == 1f), reset it
+        if (PlayerObj[0].player.getPlaybackParameters().speed != 1f) {
+            PlayerObj[0].player.setPlaybackParameters(PlaybackParameters.DEFAULT);
         }
 
         long Duration = PlayerObj[0].player.getDuration();

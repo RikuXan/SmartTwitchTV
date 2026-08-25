@@ -88,6 +88,18 @@ public final class TwitchLivePlaybackSpeedControl implements LivePlaybackSpeedCo
         return C.TIME_UNSET;
     }
 
+    public long getWindowedMinMs() {
+        return Util.usToMs(windowedMinUs());
+    }
+
+    public long getStallExtraMs() {
+        return Util.usToMs(stallExtraUs);
+    }
+
+    public float getAdjustedSpeed() {
+        return adjustedSpeed;
+    }
+
     private void recordBuffer(long nowMs, long bufferedDurationUs) {
         long bucket = nowMs / BUCKET_MS;
 
