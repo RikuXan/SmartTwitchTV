@@ -150,6 +150,10 @@ var Settings_value = {
         values: ['no', 'yes'],
         defaultValue: 1
     },
+    ll_target: {
+        values: ['0.75s', '1s', '1.25s', '1.5s', '2s', '3s'],
+        defaultValue: 1
+    },
     ttv_lolProxy: {
         //Migrated to dialog
         values: ['no', 'yes'],
@@ -984,6 +988,7 @@ function Settings_SetSettings() {
     Settings_value[key].values[0] = STR_AUTO;
     Settings_value[key].values[1] = STR_SOURCE;
     div += Settings_Content('speed_adjust', dis_ena, STR_SPEED_ADJUST, STR_SPEED_ADJUST_SUMMARY);
+    div += Settings_Content('ll_target', Settings_value.ll_target.values, STR_LL_TARGET, STR_LL_TARGET_SUMMARY);
 
     //Dialog settings
     //div += Settings_Content('proxy_settings', [STR_ENTER_TO_OPEN], PROXY_SETTINGS, null);
@@ -1156,6 +1161,7 @@ function Settings_SetDefaults() {
     Settings_set_all_notification();
     Settings_SetLang();
     Settings_SetSpeed_adjust();
+    Settings_SetLLTarget();
 
     Settings_SetResBitRate(0);
 
@@ -1392,6 +1398,7 @@ function Settings_SetDefault(position) {
     else if (position === 'end_dialog_counter') Play_EndSettingsCounter = Settings_Obj_default('end_dialog_counter');
     else if (position === 'default_quality') Play_SetQuality();
     else if (position === 'speed_adjust') Settings_SetSpeed_adjust();
+    else if (position === 'll_target') Settings_SetLLTarget();
     else if (position === 'seek_preview') PlayVod_SetPreviewType();
     else if (position === 'check_source') OSInterface_SetCheckSource(Settings_Obj_default('check_source') === 1);
     else if (position === 'thumb_quality') Main_SetThumb();
@@ -1840,6 +1847,10 @@ function Settings_SetResBitRateMin() {
 
 function Settings_SetSpeed_adjust() {
     OSInterface_setSpeedAdjustment(Settings_Obj_default('speed_adjust'));
+}
+
+function Settings_SetLLTarget() {
+    OSInterface_mSetLatencyTargetMs(parseFloat(Settings_Obj_values('ll_target')) * 1000);
 }
 
 function Settings_ExtraCodecs(showWarning) {

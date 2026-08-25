@@ -28,12 +28,16 @@ android {
 
     buildTypes {
         release {
+            applicationIdSuffix ".ll"
             minifyEnabled true
             shrinkResources true
             proguardFiles = [
                     getDefaultProguardFile('proguard-android.txt'),
                     'proguard-rules.pro'
             ]
+            firebaseCrashlytics {
+                mappingFileUploadEnabled false
+            }
         }
         debug {
             applicationIdSuffix ".debug"

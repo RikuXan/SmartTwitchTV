@@ -78,7 +78,6 @@ import androidx.media3.common.TrackSelectionOverride;
 import androidx.media3.common.TrackSelectionParameters;
 import androidx.media3.common.Tracks;
 import androidx.media3.common.util.Util;
-import androidx.media3.exoplayer.DefaultLivePlaybackSpeedControl;
 import androidx.media3.exoplayer.DefaultRenderersFactory;
 import androidx.media3.exoplayer.ExoPlayer;
 import androidx.media3.exoplayer.analytics.AnalyticsListener;
@@ -188,6 +187,7 @@ public class PlayerActivity extends Activity {
     private long SpeedCounter = 0L;
     private int mLowLatency = 0;
     private int mLowLatencyVod = 7;
+    private int mLowLatencyTargetMs = 1000;
     private boolean speedAdjustment = false;
     private int CatchupBehindCounter = 0;
     private final Timeline.Window CatchupWindow = new Timeline.Window();
@@ -626,16 +626,7 @@ public class PlayerActivity extends Activity {
                         DeviceRam / PlayerObj[PlayerObjPosition].loadControlRamDivider
                     )
                 )
-                .setLivePlaybackSpeedControl(
-                    new DefaultLivePlaybackSpeedControl.Builder()
-                        .setFallbackMaxPlaybackSpeed(1.0f)
-                        .setFallbackMinPlaybackSpeed(1.0f)
-                        //Default 500ms per rebuffer permanently ratchets the target offset up over long sessions
-                        .setTargetLiveOffsetIncrementOnRebufferMs(0)
-                        //Default 0.999 keeps one bad network patch raising the target for many minutes
-                        .setMinPossibleLiveOffsetSmoothingFactor(0.99f)
-                        .build()
-                )
+                .setLivePlaybackSpeedControl(new TwitchLivePlaybackSpeedControl())
                 .build();
 
             PlayerObj[PlayerObjPosition].Listener = new PlayerEventListener(PlayerObjPosition);
@@ -1235,6 +1226,29 @@ public class PlayerActivity extends Activity {
         CurrentPositionHandler[0].postDelayed(
                 () -> {
                     PlayerCurrentPosition = PlayerObj[0].player != null ? PlayerObj[0].player.getCurrentPosition() : 0L;
+
+                    if (BuildConfig.DEBUG && PlayerObj[0].player != null && PlayerObj[0].Type == 1) {
+                        long dur = PlayerObj[0].player.getDuration();
+                        long pos = PlayerObj[0].player.getCurrentPosition();
+                        Timeline tl = PlayerObj[0].player.getCurrentTimeline();
+                        long target = -1;
+                        if (!tl.isEmpty()) {
+                            tl.getWindow(PlayerObj[0].player.getCurrentMediaItemIndex(), CatchupWindow);
+                            if (CatchupWindow.liveConfiguration != null) target = CatchupWindow.liveConfiguration.targetOffsetMs;
+                        }
+                        Log.i(
+                            "TwitchLL",
+                            "raw=" + PlayerObj[0].player.getCurrentLiveOffset() +
+                            " shown=" + getCurrentLiveOffset(0, dur, pos) +
+                            " edgeDist=" + (dur - pos) +
+                            " buf=" + PlayerObj[0].player.getTotalBufferedDuration() +
+                            " speed=" + PlayerObj[0].player.getPlaybackParameters().speed +
+                            " target=" + target +
+                            " lowLat=" + mLowLatency +
+                            " targetMs=" + mLowLatencyTargetMs +
+                            " speedAdj=" + speedAdjustment
+                        );
+                    }
 
                     LiveCatchupCheck();
                     GetCurrentPosition();
@@ -2771,6 +2785,7 @@ public class PlayerActivity extends Activity {
                                 mWebViewContext,
                                 Type,
                                 getLowLatency(Type),
+                    mLowLatencyTargetMs,
                                 speedAdjustment,
                                 mainPlaylistString,
                                 userAgent
@@ -2813,6 +2828,7 @@ public class PlayerActivity extends Activity {
                         mWebViewContext,
                         Type,
                         getLowLatency(Type),
+                    mLowLatencyTargetMs,
                         speedAdjustment,
                         mainPlaylistString,
                         userAgent
@@ -3127,6 +3143,7 @@ public class PlayerActivity extends Activity {
                     mWebViewContext,
                     Type,
                     getLowLatency(Type),
+                    mLowLatencyTargetMs,
                     speedAdjustment,
                     mainPlaylistString,
                     userAgent
@@ -3174,6 +3191,7 @@ public class PlayerActivity extends Activity {
                     mWebViewContext,
                     1,
                     getLowLatency(1),
+                    mLowLatencyTargetMs,
                     speedAdjustment,
                     mainPlaylistString,
                     userAgent
@@ -3206,6 +3224,7 @@ public class PlayerActivity extends Activity {
                     mWebViewContext,
                     Type,
                     getLowLatency(Type),
+                    mLowLatencyTargetMs,
                     speedAdjustment,
                     mainPlaylistString,
                     userAgent
@@ -3263,6 +3282,11 @@ public class PlayerActivity extends Activity {
         @JavascriptInterface
         public void mSetlatencyVod(int LowLatencyVod) {
             mLowLatencyVod = LowLatencyVod;
+        }
+
+        @JavascriptInterface
+        public void mSetLatencyTargetMs(int TargetMs) {
+            mLowLatencyTargetMs = TargetMs;
         }
 
         @JavascriptInterface
@@ -3512,7 +3536,8 @@ public class PlayerActivity extends Activity {
                     Duration = PlayerObj[0].player.getDuration();
                     Position = PlayerObj[0].player.getCurrentPosition();
 
-                    LiveOffset = getCurrentLiveOffset(0, Duration, Position);
+                    //Buffered content already exists, the real latency can never be below it
+                    LiveOffset = Math.max(getCurrentLiveOffset(0, Duration, Position), buffer);
                 }
 
                 getVideoStatusResult = new Gson()
@@ -3625,6 +3650,7 @@ public class PlayerActivity extends Activity {
                     mWebViewContext,
                     1,
                     getLowLatency(1),
+                    mLowLatencyTargetMs,
                     speedAdjustment,
                     mainPlaylistString,
                     userAgent

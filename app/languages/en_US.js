@@ -911,6 +911,10 @@ function en_USLang() {
     STR_SPEED_ADJUST_SUMMARY =
         'When low latency is enabled, auto-adjust the latency if it is off the expected target, by slowing or speeding the stream by 1%, the speed change can cause minor audio noise when the latency is being adjusted.';
 
+    STR_LL_TARGET = 'Lowest latency buffer';
+    STR_LL_TARGET_SUMMARY =
+        'The buffer the player tries to keep in the lowest latency mode, lower values give a stream closer to real time but less protection against buffering, the resulting latency depends on the stream, if it stutters or buffers often increase this value.';
+
     STR_SW_CODEC = 'Software codec';
     STR_HW_CODEC = 'Hardware codec';
 
