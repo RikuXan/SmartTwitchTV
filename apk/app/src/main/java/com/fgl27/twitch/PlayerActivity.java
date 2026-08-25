@@ -191,13 +191,6 @@ public class PlayerActivity extends Activity {
     private boolean speedAdjustment = false;
     private int CatchupBehindCounter = 0;
     private final Timeline.Window CatchupWindow = new Timeline.Window();
-    private TwitchLivePlaybackSpeedControl MainSpeedControl;
-
-    private TwitchLivePlaybackSpeedControl NewSpeedControl(int PlayerObjPosition) {
-        TwitchLivePlaybackSpeedControl speedControl = new TwitchLivePlaybackSpeedControl();
-        if (PlayerObjPosition == 0) MainSpeedControl = speedControl;
-        return speedControl;
-    }
     private boolean AlreadyStarted;
     private boolean onCreateReady;
     private boolean IsStopped;
@@ -291,6 +284,8 @@ public class PlayerActivity extends Activity {
         float volume;
 
         Handler CheckHandler;
+
+        TwitchLivePlaybackSpeedControl SpeedControl;
 
         long ResumePosition;
         long LatencyOffSet;
@@ -633,7 +628,9 @@ public class PlayerActivity extends Activity {
                         DeviceRam / PlayerObj[PlayerObjPosition].loadControlRamDivider
                     )
                 )
-                .setLivePlaybackSpeedControl(NewSpeedControl(PlayerObjPosition))
+                .setLivePlaybackSpeedControl(
+                    PlayerObj[PlayerObjPosition].SpeedControl = new TwitchLivePlaybackSpeedControl()
+                )
                 .build();
 
             PlayerObj[PlayerObjPosition].Listener = new PlayerEventListener(PlayerObjPosition);
@@ -1251,9 +1248,9 @@ public class PlayerActivity extends Activity {
                             " buf=" + PlayerObj[0].player.getTotalBufferedDuration() +
                             " pp=" + PlayerObj[0].player.getPlaybackParameters().speed +
                             " pos=" + pos +
-                            " ctlMin=" + (MainSpeedControl != null ? MainSpeedControl.getWindowedMinMs() : -1) +
-                            " ctlStallX=" + (MainSpeedControl != null ? MainSpeedControl.getStallExtraMs() : -1) +
-                            " ctlSpeed=" + (MainSpeedControl != null ? MainSpeedControl.getAdjustedSpeed() : -1) +
+                            " ctlMin=" + (PlayerObj[0].SpeedControl != null ? PlayerObj[0].SpeedControl.getWindowedMinMs() : -1) +
+                            " ctlStallX=" + (PlayerObj[0].SpeedControl != null ? PlayerObj[0].SpeedControl.getStallExtraMs() : -1) +
+                            " ctlSpeed=" + (PlayerObj[0].SpeedControl != null ? PlayerObj[0].SpeedControl.getAdjustedSpeed() : -1) +
                             " target=" + target +
                             " lowLat=" + mLowLatency +
                             " targetMs=" + mLowLatencyTargetMs +
