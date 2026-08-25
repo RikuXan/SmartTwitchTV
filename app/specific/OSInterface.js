@@ -422,6 +422,16 @@ function OSInterface_setSpeedAdjustment(speedAdjustment) {
     }
 }
 
+//public void mSetLatencyTargetMs(int TargetMs)
+//TargetMs = the live offset the player holds in the lowest latency mode
+function OSInterface_mSetLatencyTargetMs(TargetMs) {
+    if (Main_IsOn_OSInterface) {
+        try {
+            Android.mSetLatencyTargetMs(TargetMs);
+        } catch (e) {}
+    }
+}
+
 //public void setAppToken(String token)
 //token =  token to save
 //Sets the app token when value is updated from JS

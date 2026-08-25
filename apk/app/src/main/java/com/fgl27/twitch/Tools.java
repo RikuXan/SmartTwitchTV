@@ -485,6 +485,7 @@ public final class Tools {
         Context context,
         int Type,
         int LowLatency,
+        int LowLatencyTargetMs,
         boolean speedAdjustment,
         String mainPlaylist,
         String userAgent
@@ -500,6 +501,7 @@ public final class Tools {
             return new HlsMediaSource.Factory(getDefaultDataSourceFactory(mainPlaylist, uri, userAgent))
                 .setAllowChunklessPreparation(true)
                 .setLowLatency(LowLatency)
+                .setLowLatencyTargetMs(LowLatencyTargetMs)
                 .setspeedAdjustment(speedAdjustment)
                 .createMediaSource(MediaItemBuilder(uri));
         } else if (Type == 2) {
