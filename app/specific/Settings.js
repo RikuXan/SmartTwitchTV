@@ -735,6 +735,11 @@ var Settings_value = {
         values: ['enabled', 'disabled'],
         defaultValue: 1
     },
+    block_qualities_1: {
+        //Migrated to dialog
+        values: ['enabled', 'disabled'],
+        defaultValue: 1
+    },
     hide_main_clock: {
         //Migrated to dialog
         values: ['no', 'yes'],
@@ -1447,7 +1452,8 @@ function Settings_SetDefault(position) {
         position === 'block_qualities_9' ||
         position === 'block_qualities_7' ||
         position === 'block_qualities_4' ||
-        position === 'block_qualities_3'
+        position === 'block_qualities_3' ||
+        position === 'block_qualities_1'
     ) {
         Settings_QualitiesCheck();
     }
@@ -2563,8 +2569,8 @@ function Settings_SetSuportedCodecs(codecs) {
 
 function Settings_QualitiesCheck() {
     Settings_DisableQualities = [];
-    var array_values = ['43', '21', '16', '14', '10', '9', '7', '4', '3'],
-        array_blocked_values = ['4200-4600', '1700-2200', '1500-1700', '1400-1500', '1000-1100', '900-1000', '700-800', '400-500', '300-400'],
+    var array_values = ['43', '21', '16', '14', '10', '9', '7', '4', '3', '1'],
+        array_blocked_values = ['4200-4600', '1700-2200', '1500-1700', '1400-1500', '1000-1100', '900-1000', '700-800', '400-500', '300-400', '100-200'],
         i = 0,
         len = array_values.length;
 
@@ -3542,6 +3548,7 @@ function Settings_block_qualities(click) {
     Settings_value.block_qualities_7.values = array_ena_dis;
     Settings_value.block_qualities_4.values = array_ena_dis;
     Settings_value.block_qualities_3.values = array_ena_dis;
+    Settings_value.block_qualities_1.values = array_ena_dis;
 
     var obj = {
         block_qualities_43: {
@@ -3596,6 +3603,12 @@ function Settings_block_qualities(click) {
             defaultValue: Settings_value.block_qualities_3.defaultValue,
             values: Settings_value.block_qualities_3.values,
             title: '3XXp',
+            summary: null
+        },
+        block_qualities_1: {
+            defaultValue: Settings_value.block_qualities_1.defaultValue,
+            values: Settings_value.block_qualities_1.values,
+            title: '1XXp',
             summary: null
         }
     };
