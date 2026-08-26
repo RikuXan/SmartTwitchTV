@@ -195,8 +195,6 @@ public class PlayerActivity extends Activity {
     private int mLowLatencyTargetMs = 1000;
     private float mUserPlaybackSpeed = 1f;
     private boolean speedAdjustment = false;
-    private int CatchupBehindCounter = 0;
-    private boolean mUserBehindLive = false;
     private final Timeline.Window CatchupWindow = new Timeline.Window();
     private boolean AlreadyStarted;
     private boolean onCreateReady;
@@ -612,7 +610,6 @@ public class PlayerActivity extends Activity {
 
         PlayerObj[PlayerObjPosition].CheckHandler.removeCallbacksAndMessages(null);
         PlayerObj[PlayerObjPosition].LatencyOffSet = 0;
-        if (PlayerObjPosition == 0) mUserBehindLive = false;
 
         //Change the visibility before starting the player, as some device will have error on visibility changes
         if (PlayerObj[PlayerObjPosition].playerView.getVisibility() != View.VISIBLE) PlayerObj[PlayerObjPosition].playerView.setVisibility(
@@ -1267,7 +1264,6 @@ public class PlayerActivity extends Activity {
                     }
 
                     LiveSpeedGateCheck();
-                    LiveCatchupCheck();
                     GetCurrentPosition();
                 },
                 CurrentPositionTimeout
@@ -1285,57 +1281,6 @@ public class PlayerActivity extends Activity {
             if (obj != null && obj.player != null && obj.Type == 1 && obj.player.getPlaybackParameters().speed != 1f) {
                 obj.player.setPlaybackParameters(PlaybackParameters.DEFAULT);
             }
-        }
-    }
-
-    //The speed based catch-up can only recover small gaps, when sustained too far behind jump back to the live edge
-    private void LiveCatchupCheck() {
-        if (
-            !speedAdjustment ||
-            mLowLatency == 0 ||
-            PlayerObj[0].player == null ||
-            PlayerObj[0].Type != 1 ||
-            !PlayerObj[0].IsPlaying ||
-            MultiStreamEnable
-        ) {
-            CatchupBehindCounter = 0;
-            return;
-        }
-
-        long Duration = PlayerObj[0].player.getDuration();
-        long Position = PlayerObj[0].player.getCurrentPosition();
-
-        if (Duration == C.TIME_UNSET || Duration <= 0 || Position <= 0) {
-            CatchupBehindCounter = 0;
-            return;
-        }
-
-        //Distance to the window edge, unlike getCurrentLiveOffset this isn't affected by EXT-X-PROGRAM-DATE-TIME desync
-        long BehindLiveEdge = Duration - Position;
-        long SeekThreshold = 10000L;
-
-        Timeline timeline = PlayerObj[0].player.getCurrentTimeline();
-        if (!timeline.isEmpty()) {
-            timeline.getWindow(PlayerObj[0].player.getCurrentMediaItemIndex(), CatchupWindow);
-            if (CatchupWindow.liveConfiguration != null && CatchupWindow.liveConfiguration.targetOffsetMs > 0) {
-                SeekThreshold = Math.max(8000L, CatchupWindow.liveConfiguration.targetOffsetMs * 3);
-            }
-        }
-
-        if (mUserBehindLive) {
-            if (BehindLiveEdge <= SeekThreshold) mUserBehindLive = false;
-            CatchupBehindCounter = 0;
-            return;
-        }
-
-        if (BehindLiveEdge > SeekThreshold) {
-            CatchupBehindCounter++;
-            if (CatchupBehindCounter >= 10) { //~5s behind the threshold at 500ms per check
-                CatchupBehindCounter = 0;
-                PlayerObj[0].player.seekToDefaultPosition();
-            }
-        } else {
-            CatchupBehindCounter = 0;
         }
     }
 
@@ -2743,12 +2688,6 @@ public class PlayerActivity extends Activity {
                     if (jumpPosition >= duration) jumpPosition = duration - 1000;
 
                     PlayerCurrentPosition = jumpPosition;
-
-                    if (PlayerObj[0].Type == 1) {
-                        mUserBehindLive = duration - jumpPosition > 5000;
-                        CatchupBehindCounter = 0;
-                    }
-
                     //Make sure we are playing and not paused, this way the listeners will properly work
                     PlayerObj[0].player.setPlayWhenReady(true);
                     PlayerObj[0].player.seekTo(jumpPosition);
