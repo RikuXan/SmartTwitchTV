@@ -81,6 +81,8 @@ import androidx.media3.common.util.Util;
 import androidx.media3.exoplayer.DefaultRenderersFactory;
 import androidx.media3.exoplayer.ExoPlayer;
 import androidx.media3.exoplayer.analytics.AnalyticsListener;
+import androidx.media3.exoplayer.source.LoadEventInfo;
+import androidx.media3.exoplayer.source.MediaLoadData;
 import androidx.media3.exoplayer.source.MediaSource;
 import androidx.media3.exoplayer.source.TrackGroupArray;
 import androidx.media3.exoplayer.trackselection.DefaultTrackSelector;
@@ -91,6 +93,7 @@ import com.fgl27.twitch.notification.NotificationUtils;
 import com.google.firebase.FirebaseApp;
 import com.google.firebase.crashlytics.FirebaseCrashlytics;
 import com.google.gson.Gson;
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
@@ -637,7 +640,7 @@ public class PlayerActivity extends Activity {
             PlayerObj[PlayerObjPosition].Listener = new PlayerEventListener(PlayerObjPosition);
             PlayerObj[PlayerObjPosition].player.addListener(PlayerObj[PlayerObjPosition].Listener);
 
-            PlayerObj[PlayerObjPosition].player.addAnalyticsListener(new AnalyticsEventListener());
+            PlayerObj[PlayerObjPosition].player.addAnalyticsListener(new AnalyticsEventListener(PlayerObjPosition));
 
             PlayerObj[PlayerObjPosition].playerView.setPlayer(PlayerObj[PlayerObjPosition].player);
         }
@@ -3880,10 +3883,122 @@ public class PlayerActivity extends Activity {
 
     private class AnalyticsEventListener implements AnalyticsListener {
 
+        private final int slot;
+        private int lastState = Player.STATE_IDLE;
+        private long stallStartMs = -1;
+        private int mediaLoadsInFlight;
+        private long mediaLoadStartMs = -1;
+        private String mediaLoadUri = "";
+        private long lastMediaDoneMs = -1;
+        private long lastManifestDoneMs = -1;
+
+        AnalyticsEventListener(int slot) {
+            this.slot = slot;
+        }
+
+        private String uriTail(LoadEventInfo loadEventInfo) {
+            String tail = loadEventInfo.uri.getLastPathSegment();
+            return tail == null ? String.valueOf(loadEventInfo.uri) : tail;
+        }
+
         @Override
         public final void onDroppedVideoFrames(@NonNull EventTime eventTime, int count, long elapsedMs) {
             droppedFrames += count;
             DroppedFramesTotal += count;
+
+            if (BuildConfig.DEBUG) {
+                Log.i("TwitchLL", "p" + slot + " DROPPED-FRAMES count=" + count + " elapsedMs=" + elapsedMs);
+            }
+        }
+
+        @Override
+        public void onPlaybackStateChanged(@NonNull EventTime eventTime, int state) {
+            if (!BuildConfig.DEBUG) return;
+
+            long now = eventTime.realtimeMs;
+            if (state == Player.STATE_BUFFERING && lastState == Player.STATE_READY) {
+                stallStartMs = now;
+                Log.i(
+                    "TwitchLL",
+                    "p" + slot +
+                    " STALL pos=" + eventTime.currentPlaybackPositionMs +
+                    " buf=" + eventTime.totalBufferedDurationMs +
+                    " inFlight=" + mediaLoadsInFlight +
+                    " loadAgeMs=" + (mediaLoadsInFlight > 0 && mediaLoadStartMs != -1 ? now - mediaLoadStartMs : -1) +
+                    " loadUri=" + (mediaLoadsInFlight > 0 ? mediaLoadUri : "-") +
+                    " sinceMediaDoneMs=" + (lastMediaDoneMs != -1 ? now - lastMediaDoneMs : -1) +
+                    " sinceManifestMs=" + (lastManifestDoneMs != -1 ? now - lastManifestDoneMs : -1)
+                );
+            } else if (state == Player.STATE_READY && stallStartMs != -1) {
+                Log.i("TwitchLL", "p" + slot + " STALL-RECOVERED durMs=" + (now - stallStartMs));
+                stallStartMs = -1;
+            }
+            lastState = state;
+        }
+
+        @Override
+        public void onLoadStarted(@NonNull EventTime eventTime, @NonNull LoadEventInfo loadEventInfo, @NonNull MediaLoadData mediaLoadData, int retryCount) {
+            if (!BuildConfig.DEBUG || mediaLoadData.dataType != C.DATA_TYPE_MEDIA) return;
+
+            mediaLoadsInFlight++;
+            mediaLoadStartMs = eventTime.realtimeMs;
+            mediaLoadUri = uriTail(loadEventInfo);
+
+            if (retryCount > 0) {
+                Log.i("TwitchLL", "p" + slot + " LOAD-RETRY n=" + retryCount + " uri=" + mediaLoadUri);
+            }
+        }
+
+        @Override
+        public void onLoadCompleted(@NonNull EventTime eventTime, @NonNull LoadEventInfo loadEventInfo, @NonNull MediaLoadData mediaLoadData) {
+            if (!BuildConfig.DEBUG) return;
+
+            if (mediaLoadData.dataType == C.DATA_TYPE_MEDIA) {
+                if (mediaLoadsInFlight > 0) mediaLoadsInFlight--;
+                lastMediaDoneMs = eventTime.realtimeMs;
+
+                if (loadEventInfo.loadDurationMs > 4000) {
+                    Log.i(
+                        "TwitchLL",
+                        "p" + slot +
+                        " SLOW-LOAD durMs=" + loadEventInfo.loadDurationMs +
+                        " bytes=" + loadEventInfo.bytesLoaded +
+                        " uri=" + uriTail(loadEventInfo)
+                    );
+                }
+            } else if (mediaLoadData.dataType == C.DATA_TYPE_MANIFEST) {
+                lastManifestDoneMs = eventTime.realtimeMs;
+            }
+        }
+
+        @Override
+        public void onLoadCanceled(@NonNull EventTime eventTime, @NonNull LoadEventInfo loadEventInfo, @NonNull MediaLoadData mediaLoadData) {
+            if (!BuildConfig.DEBUG || mediaLoadData.dataType != C.DATA_TYPE_MEDIA) return;
+
+            if (mediaLoadsInFlight > 0) mediaLoadsInFlight--;
+            Log.i("TwitchLL", "p" + slot + " LOAD-CANCELED uri=" + uriTail(loadEventInfo));
+        }
+
+        @Override
+        public void onLoadError(@NonNull EventTime eventTime, @NonNull LoadEventInfo loadEventInfo, @NonNull MediaLoadData mediaLoadData, @NonNull IOException error, boolean wasCanceled) {
+            if (!BuildConfig.DEBUG) return;
+
+            if (mediaLoadData.dataType == C.DATA_TYPE_MEDIA && mediaLoadsInFlight > 0) mediaLoadsInFlight--;
+            Log.i(
+                "TwitchLL",
+                "p" + slot +
+                " LOAD-ERROR dataType=" + mediaLoadData.dataType +
+                " canceled=" + wasCanceled +
+                " uri=" + uriTail(loadEventInfo) +
+                " err=" + error
+            );
+        }
+
+        @Override
+        public void onAudioUnderrun(@NonNull EventTime eventTime, int bufferSize, long bufferSizeMs, long elapsedSinceLastFeedMs) {
+            if (BuildConfig.DEBUG) {
+                Log.i("TwitchLL", "p" + slot + " AUDIO-UNDERRUN bufMs=" + bufferSizeMs + " sinceFeedMs=" + elapsedSinceLastFeedMs);
+            }
         }
 
         @Override
