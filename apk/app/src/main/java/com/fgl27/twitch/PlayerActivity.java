@@ -3539,7 +3539,8 @@ public class PlayerActivity extends Activity {
                             Tools.GetCounters(PingValue, PingValueAVG, PingCounter), //6
                             (buffer / 1000.0), //7
                             Duration, //8
-                            Position //9
+                            Position, //9
+                            PlayerObj[0].SpeedControl != null ? PlayerObj[0].SpeedControl.getAdjustedSpeed() : 1f //10
                         }
                     );
                 //Erase after read
