@@ -3540,7 +3540,10 @@ public class PlayerActivity extends Activity {
                             (buffer / 1000.0), //7
                             Duration, //8
                             Position, //9
-                            PlayerObj[0].SpeedControl != null ? PlayerObj[0].SpeedControl.getAdjustedSpeed() : 1f //10
+                            PlayerObj[0].SpeedControl != null ? PlayerObj[0].SpeedControl.getAdjustedSpeed() : 1f, //10
+                            mLowLatency == 1 && PlayerObj[0].SpeedControl != null
+                                ? mLowLatencyTargetMs + PlayerObj[0].SpeedControl.getStallExtraMs()
+                                : 0 //11
                         }
                     );
                 //Erase after read
