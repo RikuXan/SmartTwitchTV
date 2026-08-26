@@ -110,6 +110,8 @@ import net.grandcentrix.tray.AppPreferences;
 //Media3 issue TODO review and remove this when the problem is resolved
 public class PlayerActivity extends Activity {
 
+    private static final boolean LL_DIAG = true;
+
     private final String TAG = "STTV_PlayerActivity";
     private final Pattern TIME_NAME = Pattern.compile("time=([^\\s]+)");
 
@@ -1235,7 +1237,7 @@ public class PlayerActivity extends Activity {
                 () -> {
                     PlayerCurrentPosition = PlayerObj[0].player != null ? PlayerObj[0].player.getCurrentPosition() : 0L;
 
-                    if (BuildConfig.DEBUG && PlayerObj[0].player != null && PlayerObj[0].Type == 1) {
+                    if (LL_DIAG && PlayerObj[0].player != null && PlayerObj[0].Type == 1) {
                         long dur = PlayerObj[0].player.getDuration();
                         long pos = PlayerObj[0].player.getCurrentPosition();
                         Timeline tl = PlayerObj[0].player.getCurrentTimeline();
@@ -3906,14 +3908,14 @@ public class PlayerActivity extends Activity {
             droppedFrames += count;
             DroppedFramesTotal += count;
 
-            if (BuildConfig.DEBUG) {
+            if (LL_DIAG) {
                 Log.i("TwitchLL", "p" + slot + " DROPPED-FRAMES count=" + count + " elapsedMs=" + elapsedMs);
             }
         }
 
         @Override
         public void onPlaybackStateChanged(@NonNull EventTime eventTime, int state) {
-            if (!BuildConfig.DEBUG) return;
+            if (!LL_DIAG) return;
 
             long now = eventTime.realtimeMs;
             if (state == Player.STATE_BUFFERING && lastState == Player.STATE_READY) {
@@ -3938,7 +3940,7 @@ public class PlayerActivity extends Activity {
 
         @Override
         public void onLoadStarted(@NonNull EventTime eventTime, @NonNull LoadEventInfo loadEventInfo, @NonNull MediaLoadData mediaLoadData, int retryCount) {
-            if (!BuildConfig.DEBUG || mediaLoadData.dataType != C.DATA_TYPE_MEDIA) return;
+            if (!LL_DIAG || mediaLoadData.dataType != C.DATA_TYPE_MEDIA) return;
 
             mediaLoadsInFlight++;
             mediaLoadStartMs = eventTime.realtimeMs;
@@ -3951,7 +3953,7 @@ public class PlayerActivity extends Activity {
 
         @Override
         public void onLoadCompleted(@NonNull EventTime eventTime, @NonNull LoadEventInfo loadEventInfo, @NonNull MediaLoadData mediaLoadData) {
-            if (!BuildConfig.DEBUG) return;
+            if (!LL_DIAG) return;
 
             if (mediaLoadData.dataType == C.DATA_TYPE_MEDIA) {
                 if (mediaLoadsInFlight > 0) mediaLoadsInFlight--;
@@ -3973,7 +3975,7 @@ public class PlayerActivity extends Activity {
 
         @Override
         public void onLoadCanceled(@NonNull EventTime eventTime, @NonNull LoadEventInfo loadEventInfo, @NonNull MediaLoadData mediaLoadData) {
-            if (!BuildConfig.DEBUG || mediaLoadData.dataType != C.DATA_TYPE_MEDIA) return;
+            if (!LL_DIAG || mediaLoadData.dataType != C.DATA_TYPE_MEDIA) return;
 
             if (mediaLoadsInFlight > 0) mediaLoadsInFlight--;
             Log.i("TwitchLL", "p" + slot + " LOAD-CANCELED uri=" + uriTail(loadEventInfo));
@@ -3981,7 +3983,7 @@ public class PlayerActivity extends Activity {
 
         @Override
         public void onLoadError(@NonNull EventTime eventTime, @NonNull LoadEventInfo loadEventInfo, @NonNull MediaLoadData mediaLoadData, @NonNull IOException error, boolean wasCanceled) {
-            if (!BuildConfig.DEBUG) return;
+            if (!LL_DIAG) return;
 
             if (mediaLoadData.dataType == C.DATA_TYPE_MEDIA && mediaLoadsInFlight > 0) mediaLoadsInFlight--;
             Log.i(
@@ -3996,7 +3998,7 @@ public class PlayerActivity extends Activity {
 
         @Override
         public void onAudioUnderrun(@NonNull EventTime eventTime, int bufferSize, long bufferSizeMs, long elapsedSinceLastFeedMs) {
-            if (BuildConfig.DEBUG) {
+            if (LL_DIAG) {
                 Log.i("TwitchLL", "p" + slot + " AUDIO-UNDERRUN bufMs=" + bufferSizeMs + " sinceFeedMs=" + elapsedSinceLastFeedMs);
             }
         }
