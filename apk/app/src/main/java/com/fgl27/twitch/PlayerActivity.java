@@ -407,6 +407,8 @@ public class PlayerActivity extends Activity {
             AlreadyStarted = true;
             onCreateReady = true;
 
+            new Thread(Tools::ProbeIngestRtts).start();
+
             //int Number_of_Cores = Runtime.getRuntime().availableProcessors();
             //Background threads
             DataThreadPool = new ThreadPoolExecutor(12, 12, 0, TimeUnit.SECONDS, new LinkedBlockingQueue<>());
@@ -3517,6 +3519,7 @@ public class PlayerActivity extends Activity {
                 long LiveOffset = 0L;
                 long Duration = 0L;
                 long Position = 0L;
+                long BufferTarget = 0L;
 
                 if (PlayerObj[0].player != null) {
                     buffer = PlayerObj[0].player.getTotalBufferedDuration();
@@ -3525,6 +3528,17 @@ public class PlayerActivity extends Activity {
 
                     //Buffered content already exists, the real latency can never be below it
                     LiveOffset = Math.max(getCurrentLiveOffset(0, Duration, Position), buffer);
+
+                    if (mLowLatency == 1) {
+                        Timeline tl = PlayerObj[0].player.getCurrentTimeline();
+                        if (!tl.isEmpty()) {
+                            tl.getWindow(PlayerObj[0].player.getCurrentMediaItemIndex(), CatchupWindow);
+                            if (CatchupWindow.liveConfiguration != null && CatchupWindow.liveConfiguration.targetOffsetMs != C.TIME_UNSET) {
+                                BufferTarget = CatchupWindow.liveConfiguration.targetOffsetMs +
+                                (PlayerObj[0].SpeedControl != null ? PlayerObj[0].SpeedControl.getStallExtraMs() : 0);
+                            }
+                        }
+                    }
                 }
 
                 getVideoStatusResult = new Gson()
@@ -3541,9 +3555,7 @@ public class PlayerActivity extends Activity {
                             Duration, //8
                             Position, //9
                             PlayerObj[0].SpeedControl != null ? PlayerObj[0].SpeedControl.getAdjustedSpeed() : 1f, //10
-                            mLowLatency == 1 && PlayerObj[0].SpeedControl != null
-                                ? mLowLatencyTargetMs + PlayerObj[0].SpeedControl.getStallExtraMs()
-                                : 0 //11
+                            BufferTarget //11
                         }
                     );
                 //Erase after read
