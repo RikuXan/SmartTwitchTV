@@ -488,7 +488,7 @@ public final class Tools {
     }
 
     private static final Pattern INGEST_CLUSTER = Pattern.compile("rtmp://(([a-z]+)[0-9]*)\\.contribute\\.live-video\\.net");
-    private static final Pattern PLAYLIST_ORIGIN = Pattern.compile("ORIGIN=\"(([a-z]+)[0-9]*)\"");
+    private static final Pattern ORIGIN_CODE = Pattern.compile("([a-z]+)[0-9]*");
     private static final float ORIGIN_RTT_CUSHION_FACTOR = 2.5f;
     private static final int ORIGIN_EXTRA_MAX_MS = 1000;
     private static final Map<String, String> ORIGIN_FAMILY_ALIASES = buildOriginFamilyAliases();
@@ -544,28 +544,36 @@ public final class Tools {
         if (!table.isEmpty()) IngestRttMs = table;
     }
 
-    static volatile String LastOriginCode = "";
-    static volatile int LastOriginExtraMs = 0;
+    public static class OriginCushion implements HlsMediaSource.OriginCushionProvider {
 
-    static int OriginCushionExtraMs(String mainPlaylist) {
-        LastOriginCode = "";
-        LastOriginExtraMs = 0;
+        public volatile String code = "";
+        public volatile int extraMs = 0;
 
+        @Override
+        public int getOriginCushionExtraMs(String originCode) {
+            code = originCode != null ? originCode : "";
+            extraMs = OriginCushionExtraMs(originCode);
+            return extraMs;
+        }
+    }
+
+    static int OriginCushionExtraMs(String originCode) {
         Map<String, Integer> table = IngestRttMs;
-        if (table == null || table.isEmpty() || mainPlaylist == null) return 0;
+        if (table == null || table.isEmpty()) return 0;
 
-        Matcher matcher = PLAYLIST_ORIGIN.matcher(mainPlaylist);
-        if (!matcher.find()) return 0;
-
-        String family = matcher.group(2);
-        if (!table.containsKey(family)) family = ORIGIN_FAMILY_ALIASES.get(family);
-
-        Integer rtt = family != null ? table.get(family) : null;
+        Integer rtt = null;
+        if (originCode != null) {
+            Matcher matcher = ORIGIN_CODE.matcher(originCode);
+            if (matcher.matches()) {
+                String family = matcher.group(1);
+                if (!table.containsKey(family)) family = ORIGIN_FAMILY_ALIASES.get(family);
+                if (family != null) rtt = table.get(family);
+            }
+        }
+        //An origin the probe never saw may be anywhere, price it as the worst known one
         if (rtt == null) rtt = Collections.max(table.values());
 
-        LastOriginCode = matcher.group(1);
-        LastOriginExtraMs = Math.min(ORIGIN_EXTRA_MAX_MS, Math.round(ORIGIN_RTT_CUSHION_FACTOR * rtt));
-        return LastOriginExtraMs;
+        return Math.min(ORIGIN_EXTRA_MAX_MS, Math.round(ORIGIN_RTT_CUSHION_FACTOR * rtt));
     }
 
     static MediaSource buildMediaSource(
@@ -576,11 +584,10 @@ public final class Tools {
         int LowLatencyTargetMs,
         boolean speedAdjustment,
         String mainPlaylist,
-        String userAgent
+        String userAgent,
+        OriginCushion originCushion
     ) {
         if (Type == 1) {
-            if (LowLatency == 1) LowLatencyTargetMs += OriginCushionExtraMs(mainPlaylist);
-
             //Twitch only serves low latency playlists (prefetch segments) when asked via fast_bread,
             //the multivariant the web app fetched was requested without it so force a refetch
             if (LowLatency == 1 && uri.toString().contains("fast_bread=false")) {
@@ -592,6 +599,7 @@ public final class Tools {
                 .setAllowChunklessPreparation(true)
                 .setLowLatency(LowLatency)
                 .setLowLatencyTargetMs(LowLatencyTargetMs)
+                .setOriginCushionProvider(LowLatency == 1 ? originCushion : null)
                 .setspeedAdjustment(speedAdjustment)
                 .createMediaSource(MediaItemBuilder(uri));
         } else if (Type == 2) {
