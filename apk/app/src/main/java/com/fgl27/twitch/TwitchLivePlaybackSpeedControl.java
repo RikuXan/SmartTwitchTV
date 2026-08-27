@@ -69,6 +69,16 @@ public final class TwitchLivePlaybackSpeedControl implements LivePlaybackSpeedCo
         stallExtraUs = Math.min(stallExtraUs + STALL_BUMP_US, STALL_EXTRA_MAX_US);
         lastStallMs = SystemClock.elapsedRealtime();
         lastUpdateMs = C.TIME_UNSET;
+
+        //The stall is already remembered by the bump; leaving its empty buffer in the window would
+        //charge it twice and slow playback away from the edge while the refill ramp is still running
+        lastBucket = Long.MIN_VALUE;
+        windowFullAtMs = C.TIME_UNSET;
+        armed = false;
+        armDeadlineMs = C.TIME_UNSET;
+        armMaxSoFarUs = 0;
+        armLastNewMaxMs = C.TIME_UNSET;
+        adjustedSpeed = 1f;
     }
 
     @Override
