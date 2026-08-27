@@ -1752,7 +1752,7 @@ function Play_ShowVideoStatus(showLatency, Who_Called, valueString) {
             value[1],
             value[2] + ' | ' + (value[3] < 10 ? STR_SPACE_HTML + STR_SPACE_HTML : '') + value[3],
             value[4] +
-                (showLatency && value[11] > 0 ? ' | ' + (value[11] / 1000).toFixed(2) : '') +
+                (showLatency && value[11] > 0 ? ' | ' + (value[11] / 1000).toFixed(2) + '+' + ((value[12] || 0) / 1000).toFixed(2) : '') +
                 (showLatency && value[10] ? ' | ' + parseFloat(value[10]).toFixed(2) + 'x' : ''),
             showLatency ? value[5] : null,
             value[6]

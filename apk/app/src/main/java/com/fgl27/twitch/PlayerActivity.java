@@ -3527,6 +3527,7 @@ public class PlayerActivity extends Activity {
                 long Duration = 0L;
                 long Position = 0L;
                 long BufferTarget = 0L;
+                long BufferJitter = 0L;
 
                 if (PlayerObj[0].player != null) {
                     buffer = PlayerObj[0].player.getTotalBufferedDuration();
@@ -3545,6 +3546,11 @@ public class PlayerActivity extends Activity {
                                 (PlayerObj[0].SpeedControl != null ? PlayerObj[0].SpeedControl.getStallExtraMs() : 0);
                             }
                         }
+
+                        if (BufferTarget > 0 && PlayerObj[0].SpeedControl != null) {
+                            long minMs = PlayerObj[0].SpeedControl.getWindowedMinMs();
+                            if (minMs >= 0) BufferJitter = Math.max(0, buffer - minMs);
+                        }
                     }
                 }
 
@@ -3562,7 +3568,8 @@ public class PlayerActivity extends Activity {
                             Duration, //8
                             Position, //9
                             PlayerObj[0].SpeedControl != null ? PlayerObj[0].SpeedControl.getAdjustedSpeed() : 1f, //10
-                            BufferTarget //11
+                            BufferTarget, //11
+                            BufferJitter //12
                         }
                     );
                 //Erase after read
