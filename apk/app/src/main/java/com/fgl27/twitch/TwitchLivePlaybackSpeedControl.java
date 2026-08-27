@@ -34,6 +34,8 @@ public final class TwitchLivePlaybackSpeedControl implements LivePlaybackSpeedCo
     private final long[] bucketMinUs = new long[WINDOW_BUCKETS];
     private long lastBucket = Long.MIN_VALUE;
     private long windowFullAtMs = C.TIME_UNSET;
+    private boolean armed = false;
+    private long armDeadlineMs = C.TIME_UNSET;
 
     private long cushionUs = C.TIME_UNSET;
     private float minPlaybackSpeed = 1f;
@@ -68,6 +70,19 @@ public final class TwitchLivePlaybackSpeedControl implements LivePlaybackSpeedCo
         if (cushionUs == C.TIME_UNSET || minPlaybackSpeed == maxPlaybackSpeed) return 1f;
 
         long nowMs = SystemClock.elapsedRealtime();
+
+        //Samples before the buffer first reaches the target are the fill ramp, not delivery
+        //jitter, they must never enter the window; the deadline covers streams that never get there
+        if (!armed) {
+            if (armDeadlineMs == C.TIME_UNSET) armDeadlineMs = nowMs + WINDOW_BUCKETS * BUCKET_MS;
+            if (bufferedDurationUs >= cushionUs + stallExtraUs || nowMs >= armDeadlineMs) {
+                armed = true;
+            } else {
+                adjustedSpeed = 1f;
+                return 1f;
+            }
+        }
+
         recordBuffer(nowMs, bufferedDurationUs);
         decayStallExtra(nowMs);
 
@@ -95,6 +110,8 @@ public final class TwitchLivePlaybackSpeedControl implements LivePlaybackSpeedCo
     public void reset() {
         lastBucket = Long.MIN_VALUE;
         windowFullAtMs = C.TIME_UNSET;
+        armed = false;
+        armDeadlineMs = C.TIME_UNSET;
         stallExtraUs = 0;
         lastStallMs = C.TIME_UNSET;
         lastUpdateMs = C.TIME_UNSET;
@@ -102,7 +119,7 @@ public final class TwitchLivePlaybackSpeedControl implements LivePlaybackSpeedCo
     }
 
     public long getWindowedMinMs() {
-        return Util.usToMs(windowedMinUs());
+        return armed ? Util.usToMs(windowedMinUs()) : -1;
     }
 
     private boolean isWarm(long nowMs) {
