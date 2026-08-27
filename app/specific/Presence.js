@@ -31,6 +31,12 @@ var Presence_pointsMessage =
     '{"operationName":"ChannelPointsContext","variables":{"channelLogin":"%l","includeGoalTypes":["CREATOR","BOOST"]},' +
     '"extensions":{"persistedQuery":{"version":1,' +
     '"sha256Hash":"7fe050e3761eb2cf258d70ee1a21cbd76fa8cf3d7e7b12fc437e7029d446b5e3"}}}';
+//VODs are credited by this authenticated progress mutation, their minute-watched analytics carry
+//no account identity; it also drives Twitch's own resume position across devices
+var Presence_vodMessage =
+    '{"operationName":"updateUserViewedVideo","variables":{"input":{"userID":"%u","position":%p,"videoID":"%v",' +
+    '"videoType":"VOD"}},"extensions":{"persistedQuery":{"version":1,' +
+    '"sha256Hash":"bb58b1bd08a4ca0c61f2b8d323381a5f4cd39d763da8698f680ef1dfaea89ca1"}}}';
 var Presence_claimMessage =
     '{"operationName":"ClaimCommunityPoints","variables":{"input":{"channelID":"%c","claimID":"%i"}},' +
     '"extensions":{"persistedQuery":{"version":1,' +
@@ -53,6 +59,9 @@ var Presence_playSessions = {};
 var Presence_minutes = {};
 var Presence_watchDueAt = {};
 var Presence_deviceId = null;
+var Presence_positionMs = 0;
+var Presence_vodDueAt = 0;
+var Presence_vodId = null;
 //The Java bridge types the callback key as long, so requests are correlated by this sequence instead
 var Presence_seq = 0;
 var Presence_pending = {};
@@ -158,6 +167,8 @@ function Presence_Tick() {
         );
     }
 
+    Presence_Vod(now);
+
     for (i = 0; i < channels.length; i++) {
         if (!Presence_sessions[channels[i]] || now >= Presence_dueAt[channels[i]]) Presence_Status(channels[i]);
 
@@ -171,6 +182,37 @@ function Presence_Tick() {
     }
 
     Main_setTimeout(Presence_Tick, Presence_tickMs);
+}
+
+function Presence_Vod(now) {
+    if (!PlayVod_isOn || Main_isStopped || !AddUser_UserIsSet()) {
+        Presence_vodId = null;
+        return;
+    }
+
+    var vodId = Main_values.ChannelVod_vodId;
+    var position = Math.floor(Presence_positionMs / 1000);
+
+    if (!vodId || position < 1) return;
+
+    if (vodId !== Presence_vodId) {
+        Presence_vodId = vodId;
+        Presence_vodDueAt = 0;
+        OSInterface_PresenceLog('watching vod=' + vodId);
+    }
+
+    if (now < Presence_vodDueAt) return;
+
+    Presence_vodDueAt = now + Presence_tickMs;
+
+    Presence_Post(
+        vodId,
+        'vod',
+        Presence_vodMessage
+            .replace('%u', AddUser_UsernameArray[0].id)
+            .replace('%p', position)
+            .replace('%v', vodId)
+    );
 }
 
 function Presence_Post(channelId, kind, postMessage, url, headers) {
