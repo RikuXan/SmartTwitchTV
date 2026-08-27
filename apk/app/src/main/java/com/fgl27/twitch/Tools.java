@@ -488,7 +488,7 @@ public final class Tools {
     }
 
     private static final Pattern INGEST_CLUSTER = Pattern.compile("rtmp://(([a-z]+)[0-9]*)\\.contribute\\.live-video\\.net");
-    private static final Pattern PLAYLIST_ORIGIN = Pattern.compile("ORIGIN=\"([a-z]+)[0-9]*\"");
+    private static final Pattern PLAYLIST_ORIGIN = Pattern.compile("ORIGIN=\"(([a-z]+)[0-9]*)\"");
     private static final float ORIGIN_RTT_CUSHION_FACTOR = 2.5f;
     private static final int ORIGIN_EXTRA_MAX_MS = 1000;
     private static final Map<String, String> ORIGIN_FAMILY_ALIASES = buildOriginFamilyAliases();
@@ -544,20 +544,28 @@ public final class Tools {
         if (!table.isEmpty()) IngestRttMs = table;
     }
 
+    static volatile String LastOriginCode = "";
+    static volatile int LastOriginExtraMs = 0;
+
     static int OriginCushionExtraMs(String mainPlaylist) {
+        LastOriginCode = "";
+        LastOriginExtraMs = 0;
+
         Map<String, Integer> table = IngestRttMs;
         if (table == null || table.isEmpty() || mainPlaylist == null) return 0;
 
         Matcher matcher = PLAYLIST_ORIGIN.matcher(mainPlaylist);
         if (!matcher.find()) return 0;
 
-        String family = matcher.group(1);
+        String family = matcher.group(2);
         if (!table.containsKey(family)) family = ORIGIN_FAMILY_ALIASES.get(family);
 
         Integer rtt = family != null ? table.get(family) : null;
         if (rtt == null) rtt = Collections.max(table.values());
 
-        return Math.min(ORIGIN_EXTRA_MAX_MS, Math.round(ORIGIN_RTT_CUSHION_FACTOR * rtt));
+        LastOriginCode = matcher.group(1);
+        LastOriginExtraMs = Math.min(ORIGIN_EXTRA_MAX_MS, Math.round(ORIGIN_RTT_CUSHION_FACTOR * rtt));
+        return LastOriginExtraMs;
     }
 
     static MediaSource buildMediaSource(

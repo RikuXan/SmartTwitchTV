@@ -23,7 +23,7 @@ public final class TwitchLivePlaybackSpeedControl implements LivePlaybackSpeedCo
 
     private static final int WINDOW_BUCKETS = 10;
     private static final long BUCKET_MS = 1000;
-    private static final long DEADBAND_US = 150_000;
+    private static final long DEADBAND_US = 50_000;
     private static final float PROPORTIONAL_FACTOR = 0.1f / C.MICROS_PER_SECOND;
     private static final long STALL_BUMP_US = 250_000;
     private static final long STALL_EXTRA_MAX_US = 1_500_000;
