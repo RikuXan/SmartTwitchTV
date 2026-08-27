@@ -46,15 +46,7 @@ public final class SignalsmithStretch {
         return nativeProcess(handle, input, inputOffsetBytes, inputFrames, output, outputCapacityFrames);
     }
 
-    public int drainCapacityFrames() {
-        return nativeDrainCapacity(handle);
-    }
-
-    public int drain(ByteBuffer output, int outputCapacityFrames) {
-        return nativeDrain(handle, output, outputCapacityFrames);
-    }
-
-    public void flush() {
+    public void reset() {
         nativeReset(handle);
     }
 
@@ -74,10 +66,6 @@ public final class SignalsmithStretch {
     private static native int nativeOutputLatency(long handle);
 
     private static native int nativeProcess(long handle, ByteBuffer input, int inputOffsetBytes, int inputFrames, ByteBuffer output, int outputCapacityFrames);
-
-    private static native int nativeDrainCapacity(long handle);
-
-    private static native int nativeDrain(long handle, ByteBuffer output, int outputCapacityFrames);
 
     private static native void nativeReset(long handle);
 
