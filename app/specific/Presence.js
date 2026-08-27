@@ -34,6 +34,7 @@ var Presence_ticks = 0;
 var Presence_seq = 0;
 var Presence_pending = {};
 var Presence_logged = 0;
+var Presence_dueAt = {};
 
 function Presence_Init() {
     if (Presence_isOn) return;
@@ -86,6 +87,7 @@ function Presence_Tick() {
         if (!Main_A_includes_B(channels, known[i])) {
             delete Presence_sessions[known[i]];
             delete Presence_counts[known[i]];
+            delete Presence_dueAt[known[i]];
             OSInterface_PresenceLog('stopped watching channel_id=' + known[i]);
         }
     }
@@ -116,7 +118,11 @@ function Presence_Tick() {
         );
     }
 
-    for (i = 0; i < channels.length; i++) Presence_Send(channels[i]);
+    var now = new Date().getTime();
+
+    for (i = 0; i < channels.length; i++) {
+        if (!Presence_sessions[channels[i]] || now >= Presence_dueAt[channels[i]]) Presence_Send(channels[i]);
+    }
 
     Main_setTimeout(Presence_Tick, Presence_tickMs);
 }
@@ -129,6 +135,7 @@ function Presence_Send(channelId) {
     }
 
     Presence_counts[channelId]++;
+    Presence_dueAt[channelId] = new Date().getTime() + Presence_tickMs;
     Presence_seq++;
     Presence_pending[Presence_seq] = channelId;
 
@@ -152,10 +159,31 @@ function Presence_Channel(id) {
     return channelId;
 }
 
+//Twitch answers every ping with setAgainInSeconds, following it keeps the app on the server's
+//own presence cadence instead of a guessed one
+function Presence_NextDue(text) {
+    var seconds = 300;
+
+    try {
+        var obj = JSON.parse(text);
+
+        if (obj && obj.data && obj.data.setSessionStatus && obj.data.setSessionStatus.setAgainInSeconds) {
+            seconds = obj.data.setSessionStatus.setAgainInSeconds;
+        }
+    } catch (e) {}
+
+    if (seconds < 60) seconds = 60;
+    else if (seconds > 600) seconds = 600;
+
+    return new Date().getTime() + seconds * 1000;
+}
+
 function Presence_Result(responseObj, key, id) {
     var channelId = Presence_Channel(id);
     var text = responseObj && responseObj.responseText ? responseObj.responseText : '';
     var failed = !responseObj || responseObj.status !== 200 || Main_A_includes_B(text, '"error');
+
+    if (!failed && channelId !== '?') Presence_dueAt[channelId] = Presence_NextDue(text);
 
     if (failed || Presence_logged < 6) {
         Presence_logged++;
