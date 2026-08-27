@@ -60,11 +60,6 @@ struct Stretcher {
             }
         }
     }
-
-    int drainCapacityFrames() const {
-        return static_cast<int>(std::ceil(stretch.inputLatency() / rate)) +
-               stretch.outputLatency() + stretch.intervalSamples();
-    }
 };
 
 Stretcher* fromHandle(jlong handle) {
@@ -117,26 +112,6 @@ JNIEXPORT jint JNICALL Java_com_fgl27_twitch_audio_SignalsmithStretch_nativeProc
     s->deinterleave(in, inputFrames);
     s->stretch.process(s->inPtrs.data(), inputFrames, s->outPtrs.data(), outputFrames);
     s->interleave(outBase, outputFrames);
-    return outputFrames;
-}
-
-JNIEXPORT jint JNICALL Java_com_fgl27_twitch_audio_SignalsmithStretch_nativeDrainCapacity(
-        JNIEnv*, jclass, jlong handle) {
-    Stretcher* s = fromHandle(handle);
-    return s == nullptr ? 0 : s->drainCapacityFrames();
-}
-
-JNIEXPORT jint JNICALL Java_com_fgl27_twitch_audio_SignalsmithStretch_nativeDrain(
-        JNIEnv* env, jclass, jlong handle, jobject outputBuffer, jint outputCapacityFrames) {
-    Stretcher* s = fromHandle(handle);
-    if (s == nullptr) return -1;
-    auto* outBase = static_cast<int16_t*>(env->GetDirectBufferAddress(outputBuffer));
-    if (outBase == nullptr) return -1;
-    int outputFrames = std::min(s->drainCapacityFrames(), outputCapacityFrames);
-    s->ensureCapacity(0, outputFrames);
-    s->stretch.flush(s->outPtrs.data(), outputFrames, static_cast<float>(s->rate));
-    s->interleave(outBase, outputFrames);
-    s->owedOutputFrames = 0.0;
     return outputFrames;
 }
 

@@ -1,17 +1,16 @@
 package com.fgl27.twitch.audio;
 
+import android.util.Log;
+
 import androidx.media3.common.C;
 import androidx.media3.common.Format;
 import androidx.media3.common.audio.AudioProcessor;
-import androidx.media3.common.util.Util;
 
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 
 public final class SignalsmithAudioProcessor implements AudioProcessor {
 
-    private static final float CLOSE_THRESHOLD = 0.0001f;
-    private static final int MIN_OUTPUT_FRAMES_FOR_SCALING = 4096;
     private static final int BLOCK_MS = 100;
     private static final int INTERVAL_MS = 40;
 
@@ -22,20 +21,19 @@ public final class SignalsmithAudioProcessor implements AudioProcessor {
     private boolean pendingRecreation;
 
     private SignalsmithStretch stretch;
-    private int inputLatencyFrames;
-    private int outputLatencyFrames;
+    private boolean configurationLogged;
 
     private ByteBuffer inputScratch = EMPTY_BUFFER;
     private ByteBuffer processBuffer = EMPTY_BUFFER;
-    private ByteBuffer drainBuffer = EMPTY_BUFFER;
     private ByteBuffer outputBuffer = EMPTY_BUFFER;
-    private boolean pendingDrain;
 
-    private long inputFrames;
-    private long outputFrames;
     private boolean inputEnded;
+    private boolean parameterChangeDrain;
 
     public void setSpeed(float speed) {
+        if (inputEnded) {
+            parameterChangeDrain = true;
+        }
         this.speed = speed;
     }
 
@@ -54,9 +52,7 @@ public final class SignalsmithAudioProcessor implements AudioProcessor {
 
     @Override
     public boolean isActive() {
-        return SignalsmithStretch.isAvailable()
-                && pendingAudioFormat.sampleRate != Format.NO_VALUE
-                && Math.abs(speed - 1f) >= CLOSE_THRESHOLD;
+        return SignalsmithStretch.isAvailable() && pendingAudioFormat.sampleRate != Format.NO_VALUE;
     }
 
     @Override
@@ -94,74 +90,36 @@ public final class SignalsmithAudioProcessor implements AudioProcessor {
         int produced = stretch.process(nativeInput, nativeInputOffset, frames, processBuffer, outputCapacityFrames);
         inputBuffer.position(inputBuffer.position() + inputBytes);
         if (produced > 0) {
-            inputFrames += frames;
-            outputFrames += produced;
             processBuffer.position(0);
             processBuffer.limit(produced * frameSize);
             outputBuffer = processBuffer;
-        } else if (produced == 0) {
-            inputFrames += frames;
         }
     }
 
     @Override
     public void queueEndOfStream() {
         inputEnded = true;
-        if (stretch != null) {
-            int frameSize = audioFormat.bytesPerFrame;
-            int capacityFrames = stretch.drainCapacityFrames();
-            drainBuffer = ensureCapacity(drainBuffer, capacityFrames * frameSize);
-            int produced = stretch.drain(drainBuffer, capacityFrames);
-            if (produced > 0) {
-                outputFrames += produced;
-                drainBuffer.position(0);
-                drainBuffer.limit(produced * frameSize);
-                pendingDrain = true;
-            }
-        }
     }
 
     @Override
     public ByteBuffer getOutput() {
         ByteBuffer output = outputBuffer;
-        if (output == EMPTY_BUFFER && pendingDrain) {
-            output = drainBuffer;
-            pendingDrain = false;
-        }
         outputBuffer = EMPTY_BUFFER;
         return output;
     }
 
     @Override
     public boolean isEnded() {
-        return inputEnded && outputBuffer == EMPTY_BUFFER && !pendingDrain;
+        return inputEnded && outputBuffer == EMPTY_BUFFER;
     }
 
     @Override
     public long getDurationAfterProcessorApplied(long durationUs) {
-        long in = processedInputFrames();
-        long out = processedOutputFrames();
-        if (out >= MIN_OUTPUT_FRAMES_FOR_SCALING && in > 0) {
-            return Util.scaleLargeTimestamp(durationUs, out, in);
-        }
         return (long) (durationUs / (double) speed);
     }
 
     public long getMediaDuration(long playoutDuration) {
-        long in = processedInputFrames();
-        long out = processedOutputFrames();
-        if (out >= MIN_OUTPUT_FRAMES_FOR_SCALING && in > 0) {
-            return Util.scaleLargeTimestamp(playoutDuration, in, out);
-        }
         return (long) (playoutDuration * (double) speed);
-    }
-
-    private long processedInputFrames() {
-        return Math.max(0, inputFrames - inputLatencyFrames);
-    }
-
-    private long processedOutputFrames() {
-        return Math.max(0, outputFrames - outputLatencyFrames);
     }
 
     @Override
@@ -169,29 +127,24 @@ public final class SignalsmithAudioProcessor implements AudioProcessor {
         if (isActive()) {
             audioFormat = pendingAudioFormat;
             if (pendingRecreation) {
-                if (stretch != null) {
-                    stretch.release();
-                    stretch = null;
-                }
+                releaseStretch();
                 stretch = new SignalsmithStretch(
                         audioFormat.channelCount,
                         audioFormat.sampleRate * BLOCK_MS / 1000,
                         audioFormat.sampleRate * INTERVAL_MS / 1000);
-                inputLatencyFrames = stretch.inputLatencyFrames();
-                outputLatencyFrames = stretch.outputLatencyFrames();
                 pendingRecreation = false;
-            } else if (stretch != null) {
-                stretch.flush();
+                logConfiguration();
+            } else if (stretch != null && !parameterChangeDrain) {
+                //Only a seek reaches flush() without a preceding queueEndOfStream(), a rate change must keep its history
+                stretch.reset();
             }
             if (stretch != null) {
                 stretch.setRate(speed);
             }
         }
         outputBuffer = EMPTY_BUFFER;
-        pendingDrain = false;
-        inputFrames = 0;
-        outputFrames = 0;
         inputEnded = false;
+        parameterChangeDrain = false;
     }
 
     @Override
@@ -200,20 +153,30 @@ public final class SignalsmithAudioProcessor implements AudioProcessor {
         pendingAudioFormat = AudioFormat.NOT_SET;
         audioFormat = AudioFormat.NOT_SET;
         pendingRecreation = false;
+        releaseStretch();
+        inputScratch = EMPTY_BUFFER;
+        processBuffer = EMPTY_BUFFER;
+        outputBuffer = EMPTY_BUFFER;
+        inputEnded = false;
+        parameterChangeDrain = false;
+    }
+
+    private void releaseStretch() {
         if (stretch != null) {
             stretch.release();
             stretch = null;
         }
-        inputLatencyFrames = 0;
-        outputLatencyFrames = 0;
-        inputScratch = EMPTY_BUFFER;
-        processBuffer = EMPTY_BUFFER;
-        drainBuffer = EMPTY_BUFFER;
-        outputBuffer = EMPTY_BUFFER;
-        pendingDrain = false;
-        inputFrames = 0;
-        outputFrames = 0;
-        inputEnded = false;
+    }
+
+    private void logConfiguration() {
+        if (configurationLogged) {
+            return;
+        }
+        configurationLogged = true;
+        int latencyFrames = stretch.inputLatencyFrames() + stretch.outputLatencyFrames();
+        Log.i("TwitchLL", "audio-stretcher=signalsmith block=" + BLOCK_MS + "ms interval=" + INTERVAL_MS
+                + "ms latency=" + (latencyFrames * 1000L / audioFormat.sampleRate) + "ms rate="
+                + audioFormat.sampleRate + " channels=" + audioFormat.channelCount);
     }
 
     private static ByteBuffer ensureCapacity(ByteBuffer buffer, int capacityBytes) {
