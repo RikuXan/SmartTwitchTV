@@ -31,6 +31,7 @@ public final class TwitchLivePlaybackSpeedControl implements LivePlaybackSpeedCo
     private static final long STALL_DECAY_US_PER_SECOND = 25_000;
     private static final long MIN_UPDATE_INTERVAL_MS = 500;
     private static final long ARM_PLATEAU_MS = 2000;
+    private static final long ARM_NEAR_PEAK_US = 200_000;
 
     private final long[] bucketMinUs = new long[WINDOW_BUCKETS];
     private long lastBucket = Long.MIN_VALUE;
@@ -75,7 +76,8 @@ public final class TwitchLivePlaybackSpeedControl implements LivePlaybackSpeedCo
         long nowMs = SystemClock.elapsedRealtime();
 
         //Samples from the startup fill ramp are not delivery jitter and must never enter the
-        //window; the ramp is over once the buffer reaches the target or stops setting new maxima
+        //window; the ramp is only over once the buffer stops setting new maxima, and arming must
+        //happen near the peak so a mid-fill delivery hiccup cannot fake the plateau
         if (!armed) {
             if (armDeadlineMs == C.TIME_UNSET) armDeadlineMs = nowMs + WINDOW_BUCKETS * BUCKET_MS;
             if (bufferedDurationUs > armMaxSoFarUs) {
@@ -83,8 +85,9 @@ public final class TwitchLivePlaybackSpeedControl implements LivePlaybackSpeedCo
                 armLastNewMaxMs = nowMs;
             }
             if (
-                bufferedDurationUs >= cushionUs + stallExtraUs ||
-                (armLastNewMaxMs != C.TIME_UNSET && nowMs - armLastNewMaxMs >= ARM_PLATEAU_MS) ||
+                (armLastNewMaxMs != C.TIME_UNSET &&
+                    nowMs - armLastNewMaxMs >= ARM_PLATEAU_MS &&
+                    bufferedDurationUs >= armMaxSoFarUs - ARM_NEAR_PEAK_US) ||
                 nowMs >= armDeadlineMs
             ) {
                 armed = true;
