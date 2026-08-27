@@ -237,6 +237,8 @@ function Main_StartApp() {
             Main_IsOn_OSInterface = Main_IsOn_OSInterfaceVersion !== '';
 
             OSInterface_setAppIds(AddCode_backup_client_id, null, null);
+
+            Presence_Init();
         } catch (e) {
             Main_IsOn_OSInterfaceVersion = version.VersionBase + '.' + version.publishVersionCode;
             Main_IsOn_OSInterface = 0;
@@ -2187,6 +2189,8 @@ function HttpGetSetUserHeader() {
     }
 
     Play_Headers = JSON.stringify(header);
+
+    Presence_Init();
 }
 
 function FullxmlHttpGet(theUrl, Headers, callbackSuccess, calbackError, key, checkResult, Method, postMessage) {
