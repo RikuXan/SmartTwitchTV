@@ -113,6 +113,8 @@ public class PlayerActivity extends Activity {
 
     private static final boolean LL_DIAG = true;
 
+    private long BufferJitterEma = -1;
+
     private final String TAG = "STTV_PlayerActivity";
     private final Pattern TIME_NAME = Pattern.compile("time=([^\\s]+)");
 
@@ -3550,7 +3552,13 @@ public class PlayerActivity extends Activity {
 
                         if (BufferTarget > 0 && PlayerObj[0].SpeedControl != null) {
                             long minMs = PlayerObj[0].SpeedControl.getWindowedMinMs();
-                            if (minMs >= 0) BufferJitter = Math.max(0, buffer - minMs);
+                            if (minMs >= 0) {
+                                long jitter = Math.max(0, buffer - minMs);
+                                BufferJitterEma = BufferJitterEma < 0 ? jitter : (BufferJitterEma * 3 + jitter) / 4;
+                                BufferJitter = BufferJitterEma;
+                            } else {
+                                BufferJitterEma = -1;
+                            }
                         }
                     }
                 }
