@@ -3732,6 +3732,11 @@ public class PlayerActivity extends Activity {
         }
 
         @JavascriptInterface
+        public void PresenceLog(String log) {
+            if (LL_DIAG) Log.i("TwitchLL", "presence " + log);
+        }
+
+        @JavascriptInterface
         public boolean getInstallFromPLay() {
             try {
                 return Tools.InstallFromPLay(getApplicationContext());

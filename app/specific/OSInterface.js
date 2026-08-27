@@ -424,6 +424,17 @@ function OSInterface_setSpeedAdjustment(speedAdjustment) {
 
 //public void mSetLatencyTargetMs(int TargetMs)
 //TargetMs = the live offset the player holds in the lowest latency mode
+//public void PresenceLog(String log)
+//Android specific: true
+//log the Twitch watch presence pings, kept in release builds to spot integrity failures
+function OSInterface_PresenceLog(log) {
+    if (Main_IsOn_OSInterface) {
+        try {
+            Android.PresenceLog(log);
+        } catch (e) {}
+    }
+}
+
 function OSInterface_mSetLatencyTargetMs(TargetMs) {
     if (Main_IsOn_OSInterface) {
         try {
