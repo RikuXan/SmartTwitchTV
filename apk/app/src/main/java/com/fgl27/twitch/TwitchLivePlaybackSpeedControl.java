@@ -30,12 +30,15 @@ public final class TwitchLivePlaybackSpeedControl implements LivePlaybackSpeedCo
     private static final long STALL_DECAY_HOLD_MS = 120_000;
     private static final long STALL_DECAY_US_PER_SECOND = 25_000;
     private static final long MIN_UPDATE_INTERVAL_MS = 500;
+    private static final long ARM_PLATEAU_MS = 2000;
 
     private final long[] bucketMinUs = new long[WINDOW_BUCKETS];
     private long lastBucket = Long.MIN_VALUE;
     private long windowFullAtMs = C.TIME_UNSET;
     private boolean armed = false;
     private long armDeadlineMs = C.TIME_UNSET;
+    private long armMaxSoFarUs = 0;
+    private long armLastNewMaxMs = C.TIME_UNSET;
 
     private long cushionUs = C.TIME_UNSET;
     private float minPlaybackSpeed = 1f;
@@ -71,11 +74,19 @@ public final class TwitchLivePlaybackSpeedControl implements LivePlaybackSpeedCo
 
         long nowMs = SystemClock.elapsedRealtime();
 
-        //Samples before the buffer first reaches the target are the fill ramp, not delivery
-        //jitter, they must never enter the window; the deadline covers streams that never get there
+        //Samples from the startup fill ramp are not delivery jitter and must never enter the
+        //window; the ramp is over once the buffer reaches the target or stops setting new maxima
         if (!armed) {
             if (armDeadlineMs == C.TIME_UNSET) armDeadlineMs = nowMs + WINDOW_BUCKETS * BUCKET_MS;
-            if (bufferedDurationUs >= cushionUs + stallExtraUs || nowMs >= armDeadlineMs) {
+            if (bufferedDurationUs > armMaxSoFarUs) {
+                armMaxSoFarUs = bufferedDurationUs;
+                armLastNewMaxMs = nowMs;
+            }
+            if (
+                bufferedDurationUs >= cushionUs + stallExtraUs ||
+                (armLastNewMaxMs != C.TIME_UNSET && nowMs - armLastNewMaxMs >= ARM_PLATEAU_MS) ||
+                nowMs >= armDeadlineMs
+            ) {
                 armed = true;
             } else {
                 adjustedSpeed = 1f;
@@ -112,6 +123,8 @@ public final class TwitchLivePlaybackSpeedControl implements LivePlaybackSpeedCo
         windowFullAtMs = C.TIME_UNSET;
         armed = false;
         armDeadlineMs = C.TIME_UNSET;
+        armMaxSoFarUs = 0;
+        armLastNewMaxMs = C.TIME_UNSET;
         stallExtraUs = 0;
         lastStallMs = C.TIME_UNSET;
         lastUpdateMs = C.TIME_UNSET;
