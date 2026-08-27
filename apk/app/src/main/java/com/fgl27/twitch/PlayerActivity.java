@@ -1261,6 +1261,8 @@ public class PlayerActivity extends Activity {
                             " target=" + target +
                             " lowLat=" + mLowLatency +
                             " targetMs=" + mLowLatencyTargetMs +
+                            " origin=" + Tools.LastOriginCode +
+                            " extraMs=" + Tools.LastOriginExtraMs +
                             " speedAdj=" + speedAdjustment
                         );
                     }
