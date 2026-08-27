@@ -1762,6 +1762,8 @@ function Play_ShowVideoStatus(showLatency, Who_Called, valueString) {
     //Remove the check after some app updates
     var timeMs = value[9] ? value[9] : OSInterface_gettime();
 
+    Presence_positionMs = timeMs;
+
     Play_BufferSize = parseFloat(value[7]);
 
     if (Who_Called !== 2) {
