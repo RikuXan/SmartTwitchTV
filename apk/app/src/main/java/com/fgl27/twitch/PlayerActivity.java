@@ -574,6 +574,11 @@ public class PlayerActivity extends Activity {
         PlayerObj[PlayerObjPosition].player = PlayerObj[4].player;
         PlayerObj[4].player = tempPlayer;
 
+        //The controller belongs to the ExoPlayer instance, it must travel with the player swap
+        TwitchLivePlaybackSpeedControl tempSpeedControl = PlayerObj[PlayerObjPosition].SpeedControl;
+        PlayerObj[PlayerObjPosition].SpeedControl = PlayerObj[4].SpeedControl;
+        PlayerObj[4].SpeedControl = tempSpeedControl;
+
         PlayerObj[PlayerObjPosition].playerView.setPlayer(PlayerObj[PlayerObjPosition].player);
         PlayerObj[PlayerObjPosition].player.setPlayWhenReady(true);
 
