@@ -81,7 +81,6 @@ import androidx.media3.common.util.Util;
 import androidx.media3.exoplayer.DefaultRenderersFactory;
 import androidx.media3.exoplayer.ExoPlayer;
 import androidx.media3.exoplayer.analytics.AnalyticsListener;
-import androidx.media3.exoplayer.audio.DefaultAudioSink;
 import androidx.media3.exoplayer.source.LoadEventInfo;
 import androidx.media3.exoplayer.source.MediaLoadData;
 import androidx.media3.exoplayer.source.MediaSource;
@@ -1288,10 +1287,7 @@ public class PlayerActivity extends Activity {
     //Covers all players so PiP and multi stream ones recover too, live only, VODs may use user speeds.
     //Only while the user chosen speed is 1f, a manual speed must not be fought
     private void LiveSpeedGateCheck() {
-        boolean liveSpeedAdjust = speedAdjustment && mLowLatency != 0 && mUserPlaybackSpeed == 1f;
-        DefaultAudioSink.DefaultAudioProcessorChain.setPitchFollowsSpeed(liveSpeedAdjust);
-
-        if (!liveSpeedAdjust) return;
+        if (!speedAdjustment || mLowLatency == 0 || mUserPlaybackSpeed != 1f) return;
 
         for (PlayerObj obj : PlayerObj) {
             if (obj != null && obj.player != null && obj.Type == 1 && obj.player.getPlaybackParameters().speed != 1f) {

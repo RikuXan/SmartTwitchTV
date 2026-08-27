@@ -29,9 +29,11 @@ public final class TwitchLivePlaybackSpeedControl implements LivePlaybackSpeedCo
     private static final long STALL_EXTRA_MAX_US = 1_500_000;
     private static final long STALL_DECAY_HOLD_MS = 120_000;
     private static final long STALL_DECAY_US_PER_SECOND = 25_000;
-    private static final long MIN_UPDATE_INTERVAL_MS = 500;
+    private static final long MIN_UPDATE_INTERVAL_MS = 1500;
     private static final long ARM_PLATEAU_MS = 2000;
     private static final long ARM_NEAR_PEAK_US = 200_000;
+    private static final float SPEED_SLEW = 0.01f;
+    private static final float SPEED_SNAP = 0.005f;
 
     private final long[] bucketMinUs = new long[WINDOW_BUCKETS];
     private long lastBucket = Long.MIN_VALUE;
@@ -109,9 +111,18 @@ public final class TwitchLivePlaybackSpeedControl implements LivePlaybackSpeedCo
         //While the window still holds the startup ramp its lows are fill artifacts, not delivery
         //jitter: shaving stays allowed, slowing down must wait for one full window of real data
         float minSpeed = isWarm(nowMs) ? minPlaybackSpeed : 1f;
-        adjustedSpeed = Math.abs(errorUs) <= DEADBAND_US
+        float targetSpeed = Math.abs(errorUs) <= DEADBAND_US
             ? 1f
             : Util.constrainValue(1f + PROPORTIONAL_FACTOR * errorUs, minSpeed, maxPlaybackSpeed);
+
+        //Each speed change reconfigures the audio time stretcher audibly, glide in small steps and
+        //prefer exactly 1f, where the stretcher is bypassed entirely
+        float delta = targetSpeed - adjustedSpeed;
+        if (targetSpeed == 1f && Math.abs(delta) <= SPEED_SLEW + SPEED_SNAP) {
+            adjustedSpeed = 1f;
+        } else if (Math.abs(delta) > SPEED_SNAP) {
+            adjustedSpeed += Math.copySign(Math.min(Math.abs(delta), SPEED_SLEW), delta);
+        }
 
         return adjustedSpeed;
     }
