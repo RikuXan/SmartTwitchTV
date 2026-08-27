@@ -19,22 +19,35 @@
 //Twitch grants channel points and counts watch time from this presence mutation, not from
 //playback itself, so without it a session earns nothing however long it plays
 var Presence_url = 'https://gql.twitch.tv/gql';
-var Presence_postMessage =
+var Presence_statusMessage =
     '{"operationName":"ChannelPage_SetSessionStatus","variables":{"input":{"sessionID":"%s","availability":"ONLINE",' +
     '"activity":{"userID":"%c","type":"WATCHING"}}},"extensions":{"persistedQuery":{"version":1,' +
     '"sha256Hash":"8521e08af74c8cb5128e4bb99fa53b591391cb19492e65fb0489aeee2f96947f"}}}';
+var Presence_pointsMessage =
+    '{"operationName":"ChannelPointsContext","variables":{"channelLogin":"%l","includeGoalTypes":["CREATOR","BOOST"]},' +
+    '"extensions":{"persistedQuery":{"version":1,' +
+    '"sha256Hash":"7fe050e3761eb2cf258d70ee1a21cbd76fa8cf3d7e7b12fc437e7029d446b5e3"}}}';
+var Presence_claimMessage =
+    '{"operationName":"ClaimCommunityPoints","variables":{"input":{"channelID":"%c","claimID":"%i"}},' +
+    '"extensions":{"persistedQuery":{"version":1,' +
+    '"sha256Hash":"46aaeebe02c99afdf4fc97c7c0cba964124bf6b0af229395f1f6d1feed05b3d0"}}}';
 
 var Presence_tickMs = 60000;
+var Presence_pointsMs = 120000;
 var Presence_isOn = false;
+var Presence_ticks = 0;
 //One activity per session, so every watched channel needs its own session like a browser tab does
 var Presence_sessions = {};
 var Presence_counts = {};
-var Presence_ticks = 0;
+var Presence_dueAt = {};
+var Presence_pointsDueAt = {};
+var Presence_logins = {};
+var Presence_balances = {};
+var Presence_claimed = {};
 //The Java bridge types the callback key as long, so requests are correlated by this sequence instead
 var Presence_seq = 0;
 var Presence_pending = {};
 var Presence_logged = 0;
-var Presence_dueAt = {};
 
 function Presence_Init() {
     if (Presence_isOn) return;
@@ -54,9 +67,14 @@ function Presence_SessionId() {
 }
 
 function Presence_AddChannel(list, data) {
-    var id = data && data.data && data.data.length ? data.data[14] : null;
+    if (!data || !data.data || !data.data.length) return;
 
-    if (id && !Main_A_includes_B(list, id.toString())) list.push(id.toString());
+    var id = data.data[14];
+
+    if (!id || Main_A_includes_B(list, id.toString())) return;
+
+    list.push(id.toString());
+    if (data.data[6]) Presence_logins[id.toString()] = data.data[6];
 }
 
 function Presence_WatchedChannels() {
@@ -81,6 +99,7 @@ function Presence_WatchedChannels() {
 function Presence_Tick() {
     var channels = Presence_WatchedChannels(),
         known = Object.keys(Presence_sessions),
+        now = new Date().getTime(),
         i = 0;
 
     for (i = 0; i < known.length; i++) {
@@ -88,6 +107,8 @@ function Presence_Tick() {
             delete Presence_sessions[known[i]];
             delete Presence_counts[known[i]];
             delete Presence_dueAt[known[i]];
+            delete Presence_pointsDueAt[known[i]];
+            delete Presence_balances[known[i]];
             OSInterface_PresenceLog('stopped watching channel_id=' + known[i]);
         }
     }
@@ -118,16 +139,25 @@ function Presence_Tick() {
         );
     }
 
-    var now = new Date().getTime();
-
     for (i = 0; i < channels.length; i++) {
-        if (!Presence_sessions[channels[i]] || now >= Presence_dueAt[channels[i]]) Presence_Send(channels[i]);
+        if (!Presence_sessions[channels[i]] || now >= Presence_dueAt[channels[i]]) Presence_Status(channels[i]);
+
+        if (Presence_logins[channels[i]] && (!Presence_pointsDueAt[channels[i]] || now >= Presence_pointsDueAt[channels[i]])) {
+            Presence_Points(channels[i]);
+        }
     }
 
     Main_setTimeout(Presence_Tick, Presence_tickMs);
 }
 
-function Presence_Send(channelId) {
+function Presence_Post(channelId, kind, postMessage) {
+    Presence_seq++;
+    Presence_pending[Presence_seq] = {channel: channelId, kind: kind};
+
+    FullxmlHttpGet(Presence_url, Main_OAuth_User_Headers, Presence_Result, Presence_Error, 0, Presence_seq, 'POST', postMessage);
+}
+
+function Presence_Status(channelId) {
     if (!Presence_sessions[channelId]) {
         Presence_sessions[channelId] = Presence_SessionId();
         Presence_counts[channelId] = 0;
@@ -136,27 +166,25 @@ function Presence_Send(channelId) {
 
     Presence_counts[channelId]++;
     Presence_dueAt[channelId] = new Date().getTime() + Presence_tickMs;
-    Presence_seq++;
-    Presence_pending[Presence_seq] = channelId;
 
-    FullxmlHttpGet(
-        Presence_url,
-        Main_OAuth_User_Headers,
-        Presence_Result,
-        Presence_Error,
-        0,
-        Presence_seq,
-        'POST',
-        Presence_postMessage.replace('%s', Presence_sessions[channelId]).replace('%c', channelId)
-    );
+    Presence_Post(channelId, 'status', Presence_statusMessage.replace('%s', Presence_sessions[channelId]).replace('%c', channelId));
 }
 
-function Presence_Channel(id) {
-    var channelId = Presence_pending[id] ? Presence_pending[id] : '?';
+function Presence_Points(channelId) {
+    Presence_pointsDueAt[channelId] = new Date().getTime() + Presence_pointsMs;
 
-    delete Presence_pending[id];
+    Presence_Post(channelId, 'points', Presence_pointsMessage.replace('%l', Presence_logins[channelId]));
+}
 
-    return channelId;
+function Presence_Claim(channelId, claimId) {
+    if (Presence_claimed[claimId]) return;
+
+    Presence_claimed[claimId] = true;
+    if (Object.keys(Presence_claimed).length > 50) Presence_claimed = {};
+
+    OSInterface_PresenceLog('claiming bonus channel_id=' + channelId + ' claim=' + claimId);
+
+    Presence_Post(channelId, 'claim', Presence_claimMessage.replace('%c', channelId).replace('%i', claimId));
 }
 
 //Twitch answers every ping with setAgainInSeconds, following it keeps the app on the server's
@@ -178,28 +206,68 @@ function Presence_NextDue(text) {
     return new Date().getTime() + seconds * 1000;
 }
 
+function Presence_ReadPoints(channelId, text) {
+    var points = null;
+
+    try {
+        var obj = JSON.parse(text);
+
+        points =
+            obj && obj.data && obj.data.community && obj.data.community.channel && obj.data.community.channel.self
+                ? obj.data.community.channel.self.communityPoints
+                : null;
+    } catch (e) {}
+
+    if (!points) {
+        OSInterface_PresenceLog('points channel_id=' + channelId + ' unreadable body=' + text.substring(0, 300));
+        return;
+    }
+
+    if (points.balance !== Presence_balances[channelId]) {
+        OSInterface_PresenceLog(
+            'points channel_id=' +
+                channelId +
+                ' balance=' +
+                points.balance +
+                (Presence_balances[channelId] !== undefined ? ' gained=' + (points.balance - Presence_balances[channelId]) : '')
+        );
+        Presence_balances[channelId] = points.balance;
+    }
+
+    if (points.availableClaim && points.availableClaim.id) Presence_Claim(channelId, points.availableClaim.id);
+}
+
 function Presence_Result(responseObj, key, id) {
-    var channelId = Presence_Channel(id);
+    var request = Presence_pending[id] ? Presence_pending[id] : {channel: '?', kind: '?'};
+
+    delete Presence_pending[id];
+
     var text = responseObj && responseObj.responseText ? responseObj.responseText : '';
     var failed = !responseObj || responseObj.status !== 200 || Main_A_includes_B(text, '"error');
 
-    if (!failed && channelId !== '?') Presence_dueAt[channelId] = Presence_NextDue(text);
-
-    if (failed || Presence_logged < 6) {
+    if (failed || request.kind === 'claim' || Presence_logged < 8) {
         Presence_logged++;
         OSInterface_PresenceLog(
-            'ping channel_id=' +
-                channelId +
-                ' n=' +
-                Presence_counts[channelId] +
+            request.kind +
+                ' channel_id=' +
+                request.channel +
                 ' status=' +
                 (responseObj ? responseObj.status : 'null') +
                 ' body=' +
                 text.substring(0, 400)
         );
     }
+
+    if (failed) return;
+
+    if (request.kind === 'status') Presence_dueAt[request.channel] = Presence_NextDue(text);
+    else if (request.kind === 'points') Presence_ReadPoints(request.channel, text);
 }
 
 function Presence_Error(responseObj, key, id) {
-    OSInterface_PresenceLog('ping channel_id=' + Presence_Channel(id) + ' failed status=' + (responseObj ? responseObj.status : 'null'));
+    var request = Presence_pending[id] ? Presence_pending[id] : {channel: '?', kind: '?'};
+
+    delete Presence_pending[id];
+
+    OSInterface_PresenceLog(request.kind + ' channel_id=' + request.channel + ' failed status=' + (responseObj ? responseObj.status : 'null'));
 }
