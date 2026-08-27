@@ -28,6 +28,7 @@ public final class TwitchLivePlaybackSpeedControl implements LivePlaybackSpeedCo
     private static final long STALL_BUMP_US = 250_000;
     private static final long STALL_EXTRA_MAX_US = 1_500_000;
     private static final long STALL_DECAY_HOLD_MS = 120_000;
+    private static final int STALL_HOLD_MAX_STREAK = 8;
     private static final long STALL_DECAY_US_PER_SECOND = 25_000;
     private static final long MIN_UPDATE_INTERVAL_MS = 1500;
     private static final long ARM_PLATEAU_MS = 2000;
@@ -48,6 +49,8 @@ public final class TwitchLivePlaybackSpeedControl implements LivePlaybackSpeedCo
     private float maxPlaybackSpeed = 1f;
     private long stallExtraUs = 0;
     private long lastStallMs = C.TIME_UNSET;
+    private int stallStreak = 0;
+    private long stallHoldMs = STALL_DECAY_HOLD_MS;
     private long lastDecayTickMs = C.TIME_UNSET;
     private long lastUpdateMs = C.TIME_UNSET;
     private float adjustedSpeed = 1f;
@@ -66,6 +69,11 @@ public final class TwitchLivePlaybackSpeedControl implements LivePlaybackSpeedCo
 
     @Override
     public void notifyRebuffer() {
+        //A stall while the cushion is still raised means the stream needs it for longer than the
+        //last hold, so each repeat holds it longer before decaying back toward the user's floor
+        stallStreak = stallExtraUs > 0 ? stallStreak + 1 : 1;
+        stallHoldMs = STALL_DECAY_HOLD_MS * Math.min(stallStreak, STALL_HOLD_MAX_STREAK);
+
         stallExtraUs = Math.min(stallExtraUs + STALL_BUMP_US, STALL_EXTRA_MAX_US);
         lastStallMs = SystemClock.elapsedRealtime();
         lastUpdateMs = C.TIME_UNSET;
@@ -151,6 +159,8 @@ public final class TwitchLivePlaybackSpeedControl implements LivePlaybackSpeedCo
         armLastNewMaxMs = C.TIME_UNSET;
         stallExtraUs = 0;
         lastStallMs = C.TIME_UNSET;
+        stallStreak = 0;
+        stallHoldMs = STALL_DECAY_HOLD_MS;
         lastUpdateMs = C.TIME_UNSET;
         adjustedSpeed = 1f;
     }
@@ -196,9 +206,10 @@ public final class TwitchLivePlaybackSpeedControl implements LivePlaybackSpeedCo
     }
 
     private void decayStallExtra(long nowMs) {
-        if (stallExtraUs > 0 && lastStallMs != C.TIME_UNSET && nowMs - lastStallMs > STALL_DECAY_HOLD_MS) {
+        if (stallExtraUs > 0 && lastStallMs != C.TIME_UNSET && nowMs - lastStallMs > stallHoldMs) {
             if (lastDecayTickMs != C.TIME_UNSET) {
                 stallExtraUs = Math.max(0, stallExtraUs - (nowMs - lastDecayTickMs) * STALL_DECAY_US_PER_SECOND / 1000);
+                if (stallExtraUs == 0) stallStreak = 0;
             }
             lastDecayTickMs = nowMs;
         } else {

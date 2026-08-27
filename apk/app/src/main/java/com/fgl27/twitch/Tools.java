@@ -552,14 +552,16 @@ public final class Tools {
         @Override
         public int getOriginCushionExtraMs(String originCode) {
             code = originCode != null ? originCode : "";
-            extraMs = OriginCushionExtraMs(originCode);
-            return extraMs;
+            int resolved = OriginCushionExtraMs(originCode);
+            extraMs = Math.max(0, resolved);
+            return resolved;
         }
     }
 
     static int OriginCushionExtraMs(String originCode) {
         Map<String, Integer> table = IngestRttMs;
-        if (table == null || table.isEmpty()) return 0;
+        //Negative means the probe has not answered yet, the caller must ask again rather than cache
+        if (table == null || table.isEmpty()) return -1;
 
         Integer rtt = null;
         if (originCode != null) {
