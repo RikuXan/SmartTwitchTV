@@ -33,6 +33,7 @@ public final class TwitchLivePlaybackSpeedControl implements LivePlaybackSpeedCo
 
     private final long[] bucketMinUs = new long[WINDOW_BUCKETS];
     private long lastBucket = Long.MIN_VALUE;
+    private long windowFullAtMs = C.TIME_UNSET;
 
     private long cushionUs = C.TIME_UNSET;
     private float minPlaybackSpeed = 1f;
@@ -76,9 +77,12 @@ public final class TwitchLivePlaybackSpeedControl implements LivePlaybackSpeedCo
         lastUpdateMs = nowMs;
 
         long errorUs = windowedMinUs() - (cushionUs + stallExtraUs);
+        //While the window still holds the startup ramp its lows are fill artifacts, not delivery
+        //jitter: shaving stays allowed, slowing down must wait for one full window of real data
+        float minSpeed = isWarm(nowMs) ? minPlaybackSpeed : 1f;
         adjustedSpeed = Math.abs(errorUs) <= DEADBAND_US
             ? 1f
-            : Util.constrainValue(1f + PROPORTIONAL_FACTOR * errorUs, minPlaybackSpeed, maxPlaybackSpeed);
+            : Util.constrainValue(1f + PROPORTIONAL_FACTOR * errorUs, minSpeed, maxPlaybackSpeed);
 
         return adjustedSpeed;
     }
@@ -88,8 +92,21 @@ public final class TwitchLivePlaybackSpeedControl implements LivePlaybackSpeedCo
         return C.TIME_UNSET;
     }
 
+    public void reset() {
+        lastBucket = Long.MIN_VALUE;
+        windowFullAtMs = C.TIME_UNSET;
+        stallExtraUs = 0;
+        lastStallMs = C.TIME_UNSET;
+        lastUpdateMs = C.TIME_UNSET;
+        adjustedSpeed = 1f;
+    }
+
     public long getWindowedMinMs() {
         return Util.usToMs(windowedMinUs());
+    }
+
+    private boolean isWarm(long nowMs) {
+        return windowFullAtMs != C.TIME_UNSET && nowMs >= windowFullAtMs;
     }
 
     public long getStallExtraMs() {
@@ -108,6 +125,7 @@ public final class TwitchLivePlaybackSpeedControl implements LivePlaybackSpeedCo
             for (long b = 0; b < clear; b++) {
                 bucketMinUs[(int) Math.floorMod(bucket - b, WINDOW_BUCKETS)] = Long.MAX_VALUE;
             }
+            if (clear == WINDOW_BUCKETS) windowFullAtMs = nowMs + WINDOW_BUCKETS * BUCKET_MS;
             lastBucket = bucket;
         }
 

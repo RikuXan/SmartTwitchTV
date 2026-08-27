@@ -655,6 +655,7 @@ public class PlayerActivity extends Activity {
         }
 
         PlayerObj[PlayerObjPosition].player.setPlayWhenReady(true);
+        if (PlayerObj[PlayerObjPosition].SpeedControl != null) PlayerObj[PlayerObjPosition].SpeedControl.reset();
         PlayerObj[PlayerObjPosition].player.setMediaSource(PlayerObj[PlayerObjPosition].mediaSources, PlayerObj[PlayerObjPosition].ResumePosition);
 
         PlayerObj[PlayerObjPosition].player.prepare();
