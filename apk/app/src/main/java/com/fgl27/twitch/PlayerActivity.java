@@ -88,6 +88,7 @@ import androidx.media3.exoplayer.source.TrackGroupArray;
 import androidx.media3.exoplayer.trackselection.DefaultTrackSelector;
 import androidx.media3.exoplayer.trackselection.MappingTrackSelector;
 import androidx.media3.ui.PlayerView;
+import com.fgl27.twitch.audio.SignalsmithRenderersFactory;
 import com.fgl27.twitch.channels.ChannelsUtils;
 import com.fgl27.twitch.notification.NotificationUtils;
 import com.google.firebase.FirebaseApp;
@@ -631,7 +632,7 @@ public class PlayerActivity extends Activity {
                     trackSelectorParameters[PlayerObj[PlayerObjPosition].trackSelectorParametersPosition]
                 );
 
-            DefaultRenderersFactory renderersFactory = new DefaultRenderersFactory(this);
+            DefaultRenderersFactory renderersFactory = new SignalsmithRenderersFactory(this);
             if (BLACKLISTED_CODECS != null) renderersFactory.setMediaCodecSelector(BLACKLISTED_CODECS);
 
             PlayerObj[PlayerObjPosition].player = new ExoPlayer.Builder(this, renderersFactory)
