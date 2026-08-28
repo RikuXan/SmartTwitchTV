@@ -449,10 +449,10 @@ function Presence_ReadInventory(text) {
                                 (drops[j].name ? drops[j].name : drops[j].id) +
                                 ' connected=' +
                                 (campaigns[i].self ? campaigns[i].self.isAccountConnected : campaigns[i].isAccountConnected) +
-                                ' campaignkeys=' +
-                                Object.keys(campaigns[i]).join(',') +
-                                ' selfkeys=' +
-                                Object.keys(drop).join(',')
+                                ' minutes=' +
+                                drop.currentMinutesWatched +
+                                ' preconditions=' +
+                                drop.hasPreconditionsMet
                         );
                     }
                 }
