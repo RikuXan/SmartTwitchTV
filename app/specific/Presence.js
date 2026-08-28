@@ -413,19 +413,20 @@ function Presence_ReadInventory(text) {
         i = 0,
         j = 0;
 
+    var inventory = null;
+
     try {
         var obj = JSON.parse(text);
 
-        campaigns =
-            obj && obj.data && obj.data.currentUser && obj.data.currentUser.inventory
-                ? obj.data.currentUser.inventory.dropCampaignsInProgress
-                : null;
+        inventory = obj && obj.data && obj.data.currentUser ? obj.data.currentUser.inventory : null;
     } catch (e) {}
 
-    if (!campaigns) {
+    if (!inventory) {
         OSInterface_PresenceLog('inventory unreadable body=' + text.substring(0, 200));
         return;
     }
+
+    campaigns = inventory.dropCampaignsInProgress ? inventory.dropCampaignsInProgress : [];
 
     for (i = 0; i < campaigns.length; i++) {
         drops = campaigns[i].timeBasedDrops ? campaigns[i].timeBasedDrops : [];
