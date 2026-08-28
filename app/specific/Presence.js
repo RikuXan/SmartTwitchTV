@@ -75,7 +75,6 @@ var Presence_vodId = null;
 var Presence_seq = 0;
 var Presence_pending = {};
 var Presence_logged = 0;
-var Presence_dropKeysLogged = 0;
 
 function Presence_Init() {
     if (Presence_isOn) return;
@@ -457,16 +456,6 @@ function Presence_ReadDrops(channelId, text) {
         return;
     }
 
-    if (campaigns && campaigns.length && Presence_dropKeysLogged < 2) {
-        Presence_dropKeysLogged++;
-        OSInterface_PresenceLog(
-            'drop keys=' +
-                Object.keys(campaigns[0]).join(',') +
-                ' group=' +
-                (campaigns[0].rewardGroups && campaigns[0].rewardGroups[0] ? Object.keys(campaigns[0].rewardGroups[0]).join(',') : 'none')
-        );
-    }
-
     if (!campaigns || !campaigns.length) {
         if (Presence_dropWatched[channelId] === undefined) {
             Presence_dropWatched[channelId] = -1;
@@ -514,9 +503,7 @@ function Presence_LogDrop(channelId, campaign, group, self) {
             required +
             (previous !== undefined ? ' gained=' + (watched - previous) : '') +
             ' status=' +
-            (self ? self.status : 'none') +
-            ' connected=' +
-            (group && group.isAccountConnected !== undefined ? group.isAccountConnected : campaign.isAccountConnected)
+            (self ? self.status : 'none')
     );
 }
 
