@@ -403,6 +403,8 @@ function Presence_ReadInventory(text) {
         drops,
         drop,
         claimed = 0,
+        pending = 0,
+        seen = 0,
         i = 0,
         j = 0;
 
@@ -415,20 +417,33 @@ function Presence_ReadInventory(text) {
                 : null;
     } catch (e) {}
 
-    if (!campaigns || !campaigns.length) return;
+    if (!campaigns) {
+        OSInterface_PresenceLog('inventory unreadable body=' + text.substring(0, 200));
+        return;
+    }
 
     for (i = 0; i < campaigns.length; i++) {
         drops = campaigns[i].timeBasedDrops ? campaigns[i].timeBasedDrops : [];
 
         for (j = 0; j < drops.length; j++) {
             drop = drops[j].self;
+            seen++;
 
-            if (!drop || !drop.dropInstanceID || drop.isClaimed) continue;
+            if (!drop) continue;
+
+            if (!drop.dropInstanceID) {
+                if (!drop.isClaimed) pending++;
+                continue;
+            }
+
+            if (drop.isClaimed) continue;
 
             Presence_ClaimDrop(campaigns[i].name ? campaigns[i].name : campaigns[i].id, drops[j].name ? drops[j].name : drops[j].id, drop.dropInstanceID);
             claimed++;
         }
     }
+
+    OSInterface_PresenceLog('inventory campaigns=' + campaigns.length + ' drops=' + seen + ' unearned=' + pending + ' claiming=' + claimed);
 
     if (claimed) Presence_inventoryDueAt = new Date().getTime() + Presence_tickMs;
 }
