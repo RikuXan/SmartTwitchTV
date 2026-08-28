@@ -41,6 +41,13 @@ var Presence_dropsMessage =
     '{"operationName":"DropChannelCampaignsProgress","variables":{"channelID":"%c"},' +
     '"extensions":{"persistedQuery":{"version":1,' +
     '"sha256Hash":"a9778563e6f7ef878891dcc4049c263ec376c1ef5c1ad69395c3d8aef7f455e4"}}}';
+var Presence_inventoryMessage =
+    '{"operationName":"Inventory","variables":{},"extensions":{"persistedQuery":{"version":1,' +
+    '"sha256Hash":"8337eb8541b314040b0edde0c09c5c7a2783ba1960aa9edfbf3bac16d0fec404"}}}';
+var Presence_dropClaimMessage =
+    '{"operationName":"DropsPage_ClaimDropRewards","variables":{"input":{"dropInstanceID":"%i"}},' +
+    '"extensions":{"persistedQuery":{"version":1,' +
+    '"sha256Hash":"a455deea71bdc9015b78eb49f4acfbce8baa7ccbedd28e549bb025bd0f751930"}}}';
 var Presence_claimMessage =
     '{"operationName":"ClaimCommunityPoints","variables":{"input":{"channelID":"%c","claimID":"%i"}},' +
     '"extensions":{"persistedQuery":{"version":1,' +
@@ -48,6 +55,7 @@ var Presence_claimMessage =
 
 var Presence_tickMs = 60000;
 var Presence_pointsMs = 120000;
+var Presence_inventoryMs = 300000;
 var Presence_isOn = false;
 var Presence_ticks = 0;
 //One activity per session, so every watched channel needs its own session like a browser tab does
@@ -60,6 +68,9 @@ var Presence_dropWatched = {};
 var Presence_logins = {};
 var Presence_balances = {};
 var Presence_claimed = {};
+var Presence_dropClaimed = {};
+var Presence_inventoryDueAt = 0;
+var Presence_inventorySwept = false;
 var Presence_broadcasts = {};
 var Presence_gameNames = {};
 var Presence_gameIds = {};
@@ -377,6 +388,62 @@ function Presence_Drops(channelId) {
     Presence_Post(channelId, 'drops', Presence_dropsMessage.replace('%c', channelId));
 }
 
+function Presence_Inventory() {
+    var now = new Date().getTime();
+
+    if (now < Presence_inventoryDueAt) return;
+
+    Presence_inventoryDueAt = now + Presence_inventoryMs;
+
+    Presence_Post('inventory', 'inventory', Presence_inventoryMessage);
+}
+
+function Presence_ReadInventory(text) {
+    var campaigns = null,
+        drops,
+        drop,
+        claimed = 0,
+        i = 0,
+        j = 0;
+
+    try {
+        var obj = JSON.parse(text);
+
+        campaigns =
+            obj && obj.data && obj.data.currentUser && obj.data.currentUser.inventory
+                ? obj.data.currentUser.inventory.dropCampaignsInProgress
+                : null;
+    } catch (e) {}
+
+    if (!campaigns || !campaigns.length) return;
+
+    for (i = 0; i < campaigns.length; i++) {
+        drops = campaigns[i].timeBasedDrops ? campaigns[i].timeBasedDrops : [];
+
+        for (j = 0; j < drops.length; j++) {
+            drop = drops[j].self;
+
+            if (!drop || !drop.dropInstanceID || drop.isClaimed) continue;
+
+            Presence_ClaimDrop(campaigns[i].name ? campaigns[i].name : campaigns[i].id, drops[j].name ? drops[j].name : drops[j].id, drop.dropInstanceID);
+            claimed++;
+        }
+    }
+
+    if (claimed) Presence_inventoryDueAt = new Date().getTime() + Presence_tickMs;
+}
+
+function Presence_ClaimDrop(campaign, drop, instanceId) {
+    if (Presence_dropClaimed[instanceId]) return;
+
+    Presence_dropClaimed[instanceId] = true;
+    if (Object.keys(Presence_dropClaimed).length > 50) Presence_dropClaimed = {};
+
+    OSInterface_PresenceLog('claiming drop campaign=' + campaign + ' drop=' + drop + ' instance=' + instanceId);
+
+    Presence_Post('drop', 'dropclaim', Presence_dropClaimMessage.replace('%i', instanceId));
+}
+
 function Presence_Claim(channelId, claimId) {
     if (Presence_claimed[claimId]) return;
 
@@ -465,6 +532,11 @@ function Presence_ReadDrops(channelId, text) {
         return;
     }
 
+    if (!Presence_inventorySwept) {
+        Presence_inventorySwept = true;
+        Presence_Inventory();
+    }
+
     for (i = 0; i < campaigns.length; i++) {
         groups = campaigns[i].rewardGroups ? campaigns[i].rewardGroups : [];
         logged = false;
@@ -505,6 +577,10 @@ function Presence_LogDrop(channelId, campaign, group, self) {
             ' status=' +
             (self ? self.status : 'none')
     );
+
+    //Twitch's own client treats the minute count reaching the requirement as earned, the status
+    //string lags behind it
+    if ((required > 0 && watched >= required) || (self && self.status && self.status !== 'IN_PROGRESS')) Presence_Inventory();
 }
 
 function Presence_Result(responseObj, key, id) {
@@ -516,7 +592,7 @@ function Presence_Result(responseObj, key, id) {
     var status = responseObj ? responseObj.status : 0;
     var failed = status < 200 || status > 299 || Main_A_includes_B(text, '"error');
 
-    if (failed || request.kind === 'claim' || Presence_logged < 8) {
+    if (failed || request.kind === 'claim' || request.kind === 'dropclaim' || Presence_logged < 8) {
         Presence_logged++;
         OSInterface_PresenceLog(
             request.kind +
@@ -534,6 +610,7 @@ function Presence_Result(responseObj, key, id) {
     if (request.kind === 'status') Presence_dueAt[request.channel] = Presence_NextDue(text);
     else if (request.kind === 'points') Presence_ReadPoints(request.channel, text);
     else if (request.kind === 'drops') Presence_ReadDrops(request.channel, text);
+    else if (request.kind === 'inventory') Presence_ReadInventory(text);
 }
 
 function Presence_Error(responseObj, key, id) {
