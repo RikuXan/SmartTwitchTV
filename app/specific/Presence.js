@@ -75,6 +75,7 @@ var Presence_vodId = null;
 var Presence_seq = 0;
 var Presence_pending = {};
 var Presence_logged = 0;
+var Presence_dropKeysLogged = 0;
 
 function Presence_Init() {
     if (Presence_isOn) return;
@@ -334,7 +335,8 @@ function Presence_Points(channelId) {
 function Presence_Info(channelId) {
     Presence_infoDueAt[channelId] = new Date().getTime() + Presence_pointsMs;
 
-    BaseXmlHttpGet(Main_helix_api + 'streams?user_id=' + channelId, Presence_InfoResult, noop_fun, channelId, 0, true);
+    //The bridge types the callback key as long, a string channel id comes back as 0
+    BaseXmlHttpGet(Main_helix_api + 'streams?user_id=' + channelId, Presence_InfoResult, noop_fun, parseInt(channelId, 10), 0, true);
 }
 
 function Presence_InfoResult(response, channelId, id) {
@@ -346,7 +348,7 @@ function Presence_InfoResult(response, channelId, id) {
         stream = obj && obj.data && obj.data.length ? obj.data[0] : null;
     } catch (e) {}
 
-    if (!stream) return;
+    if (!stream || !Presence_logins[channelId]) return;
 
     if (stream.game_name && stream.game_name !== Presence_gameNames[channelId]) {
         OSInterface_PresenceLog(
@@ -453,6 +455,16 @@ function Presence_ReadDrops(channelId, text) {
     if (Main_A_includes_B(text, '"challenge"')) {
         OSInterface_PresenceLog('drop channel_id=' + channelId + ' challenged body=' + text.substring(0, 200));
         return;
+    }
+
+    if (campaigns && campaigns.length && Presence_dropKeysLogged < 2) {
+        Presence_dropKeysLogged++;
+        OSInterface_PresenceLog(
+            'drop keys=' +
+                Object.keys(campaigns[0]).join(',') +
+                ' group=' +
+                (campaigns[0].rewardGroups && campaigns[0].rewardGroups[0] ? Object.keys(campaigns[0].rewardGroups[0]).join(',') : 'none')
+        );
     }
 
     if (!campaigns || !campaigns.length) {
