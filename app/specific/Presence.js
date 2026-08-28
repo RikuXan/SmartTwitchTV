@@ -580,7 +580,9 @@ function Presence_LogDrop(channelId, campaign, group, self) {
 
     //Twitch's own client treats the minute count reaching the requirement as earned, the status
     //string lags behind it
-    if ((required > 0 && watched >= required) || (self && self.status && self.status !== 'IN_PROGRESS')) Presence_Inventory();
+    if (!self || self.status === 'CLAIMED' || self.status === 'FULFILLED') return;
+
+    if ((required > 0 && watched >= required) || (self.status && self.status !== 'IN_PROGRESS')) Presence_Inventory();
 }
 
 function Presence_Result(responseObj, key, id) {
