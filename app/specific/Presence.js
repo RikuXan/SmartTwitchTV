@@ -63,6 +63,7 @@ var Presence_claimed = {};
 var Presence_broadcasts = {};
 var Presence_gameNames = {};
 var Presence_gameIds = {};
+var Presence_infoDueAt = {};
 var Presence_playSessions = {};
 var Presence_minutes = {};
 var Presence_watchDueAt = {};
@@ -107,9 +108,12 @@ function Presence_AddChannel(list, data) {
 
     list.push(id.toString());
     if (data.data[6]) Presence_logins[id.toString()] = data.data[6];
-    if (data.data[7]) Presence_broadcasts[id.toString()] = data.data[7];
-    if (data.data[3]) Presence_gameNames[id.toString()] = data.data[3];
-    if (data.data[18]) Presence_gameIds[id.toString()] = data.data[18].toString();
+
+    //Only a seed for the first event, the player refreshes this array on panel open alone and
+    //Presence_Info owns the values from then on
+    if (data.data[7] && !Presence_broadcasts[id.toString()]) Presence_broadcasts[id.toString()] = data.data[7];
+    if (data.data[3] && !Presence_gameNames[id.toString()]) Presence_gameNames[id.toString()] = data.data[3];
+    if (data.data[18] && !Presence_gameIds[id.toString()]) Presence_gameIds[id.toString()] = data.data[18].toString();
 }
 
 function Presence_WatchedChannels() {
@@ -147,6 +151,7 @@ function Presence_Tick() {
             delete Presence_dropWatched[known[i]];
             delete Presence_gameNames[known[i]];
             delete Presence_gameIds[known[i]];
+            delete Presence_infoDueAt[known[i]];
             delete Presence_balances[known[i]];
             delete Presence_watchDueAt[known[i]];
             delete Presence_playSessions[known[i]];
@@ -195,6 +200,8 @@ function Presence_Tick() {
         }
 
         if (!Presence_dropsDueAt[channels[i]] || now >= Presence_dropsDueAt[channels[i]]) Presence_Drops(channels[i]);
+
+        if (!Presence_infoDueAt[channels[i]] || now >= Presence_infoDueAt[channels[i]]) Presence_Info(channels[i]);
     }
 
     Main_setTimeout(Presence_Tick, Presence_tickMs);
@@ -322,6 +329,45 @@ function Presence_Points(channelId) {
     Presence_pointsDueAt[channelId] = new Date().getTime() + Presence_pointsMs;
 
     Presence_Post(channelId, 'points', Presence_pointsMessage.replace('%l', Presence_logins[channelId]));
+}
+
+function Presence_Info(channelId) {
+    Presence_infoDueAt[channelId] = new Date().getTime() + Presence_pointsMs;
+
+    BaseXmlHttpGet(Main_helix_api + 'streams?user_id=' + channelId, Presence_InfoResult, noop_fun, channelId, 0, true);
+}
+
+function Presence_InfoResult(response, channelId, id) {
+    var stream = null;
+
+    try {
+        var obj = JSON.parse(response);
+
+        stream = obj && obj.data && obj.data.length ? obj.data[0] : null;
+    } catch (e) {}
+
+    if (!stream) return;
+
+    if (stream.game_name && stream.game_name !== Presence_gameNames[channelId]) {
+        OSInterface_PresenceLog(
+            'game channel_id=' +
+                channelId +
+                ' was=' +
+                (Presence_gameNames[channelId] ? Presence_gameNames[channelId] : 'none') +
+                ' now=' +
+                stream.game_name +
+                '/' +
+                stream.game_id
+        );
+        Presence_gameNames[channelId] = stream.game_name;
+    }
+
+    if (stream.game_id) Presence_gameIds[channelId] = stream.game_id.toString();
+
+    if (stream.id && stream.id.toString() !== Presence_broadcasts[channelId]) {
+        OSInterface_PresenceLog('broadcast channel_id=' + channelId + ' was=' + (Presence_broadcasts[channelId] ? Presence_broadcasts[channelId] : 'none') + ' now=' + stream.id);
+        Presence_broadcasts[channelId] = stream.id.toString();
+    }
 }
 
 function Presence_Drops(channelId) {
