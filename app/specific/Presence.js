@@ -199,6 +199,11 @@ function Presence_Tick() {
 
     Presence_Vod(now);
 
+    if (channels.length && !Presence_inventorySwept) {
+        Presence_inventorySwept = true;
+        Presence_Inventory();
+    }
+
     for (i = 0; i < channels.length; i++) {
         if (!Presence_sessions[channels[i]] || now >= Presence_dueAt[channels[i]]) Presence_Status(channels[i]);
 
@@ -545,11 +550,6 @@ function Presence_ReadDrops(channelId, text) {
         }
 
         return;
-    }
-
-    if (!Presence_inventorySwept) {
-        Presence_inventorySwept = true;
-        Presence_Inventory();
     }
 
     for (i = 0; i < campaigns.length; i++) {
