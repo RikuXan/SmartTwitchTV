@@ -564,13 +564,16 @@ function Presence_ReadDrops(channelId, text) {
             logged = true;
         }
 
-        if (!logged) Presence_LogDrop(channelId, campaigns[i], campaigns[i], campaigns[i].self);
+        if (!logged && campaigns[i].self) Presence_LogDrop(channelId, campaigns[i], campaigns[i], campaigns[i].self);
     }
 }
 
 function Presence_LogDrop(channelId, campaign, group, self) {
     var key = channelId + '|' + (group && group.id ? group.id : campaign.id),
-        required = group && group.progressCriteria && group.progressCriteria.requirements ? group.progressCriteria.requirements.minutesWatched : 0,
+        required =
+            group && group.progressCriteria && group.progressCriteria.requirements && group.progressCriteria.requirements.minutesWatched
+                ? group.progressCriteria.requirements.minutesWatched
+                : 0,
         watched = self && self.currentMinutesWatched ? self.currentMinutesWatched : 0,
         previous = Presence_dropWatched[key];
 
