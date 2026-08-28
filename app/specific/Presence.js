@@ -37,6 +37,10 @@ var Presence_vodMessage =
     '{"operationName":"updateUserViewedVideo","variables":{"input":{"userID":"%u","position":%p,"videoID":"%v",' +
     '"videoType":"VOD"}},"extensions":{"persistedQuery":{"version":1,' +
     '"sha256Hash":"bb58b1bd08a4ca0c61f2b8d323381a5f4cd39d763da8698f680ef1dfaea89ca1"}}}';
+var Presence_dropsMessage =
+    '{"operationName":"DropChannelCampaignsProgress","variables":{"channelID":"%c"},' +
+    '"extensions":{"persistedQuery":{"version":1,' +
+    '"sha256Hash":"a9778563e6f7ef878891dcc4049c263ec376c1ef5c1ad69395c3d8aef7f455e4"}}}';
 var Presence_claimMessage =
     '{"operationName":"ClaimCommunityPoints","variables":{"input":{"channelID":"%c","claimID":"%i"}},' +
     '"extensions":{"persistedQuery":{"version":1,' +
@@ -51,10 +55,14 @@ var Presence_sessions = {};
 var Presence_counts = {};
 var Presence_dueAt = {};
 var Presence_pointsDueAt = {};
+var Presence_dropsDueAt = {};
+var Presence_dropWatched = {};
 var Presence_logins = {};
 var Presence_balances = {};
 var Presence_claimed = {};
 var Presence_broadcasts = {};
+var Presence_gameNames = {};
+var Presence_gameIds = {};
 var Presence_playSessions = {};
 var Presence_minutes = {};
 var Presence_watchDueAt = {};
@@ -100,6 +108,8 @@ function Presence_AddChannel(list, data) {
     list.push(id.toString());
     if (data.data[6]) Presence_logins[id.toString()] = data.data[6];
     if (data.data[7]) Presence_broadcasts[id.toString()] = data.data[7];
+    if (data.data[3]) Presence_gameNames[id.toString()] = data.data[3];
+    if (data.data[18]) Presence_gameIds[id.toString()] = data.data[18].toString();
 }
 
 function Presence_WatchedChannels() {
@@ -133,6 +143,10 @@ function Presence_Tick() {
             delete Presence_counts[known[i]];
             delete Presence_dueAt[known[i]];
             delete Presence_pointsDueAt[known[i]];
+            delete Presence_dropsDueAt[known[i]];
+            delete Presence_dropWatched[known[i]];
+            delete Presence_gameNames[known[i]];
+            delete Presence_gameIds[known[i]];
             delete Presence_balances[known[i]];
             delete Presence_watchDueAt[known[i]];
             delete Presence_playSessions[known[i]];
@@ -179,6 +193,8 @@ function Presence_Tick() {
         if (Presence_logins[channels[i]] && (!Presence_watchDueAt[channels[i]] || now >= Presence_watchDueAt[channels[i]])) {
             Presence_Watch(channels[i]);
         }
+
+        if (!Presence_dropsDueAt[channels[i]] || now >= Presence_dropsDueAt[channels[i]]) Presence_Drops(channels[i]);
     }
 
     Main_setTimeout(Presence_Tick, Presence_tickMs);
@@ -238,34 +254,41 @@ function Presence_Watch(channelId) {
 
     Presence_minutes[channelId] = Presence_minutes[channelId] ? Presence_minutes[channelId] + 1 : 1;
 
-    var event = {
-        event: 'minute-watched',
-        properties: {
-            broadcast_id: Presence_broadcasts[channelId] ? Presence_broadcasts[channelId] : '',
-            channel: Presence_logins[channelId],
-            channel_id: parseInt(channelId, 10),
-            client_app: 'twilight',
-            client_time: Math.floor(new Date().getTime() / 1000),
-            device_id: Presence_DeviceId(),
-            hidden: false,
-            live: true,
-            location: 'channel',
-            logged_in: true,
-            login: AddUser_UsernameArray[0].name,
-            minutes_logged: Presence_minutes[channelId],
-            muted: false,
-            platform: 'web',
-            play_session_id: Presence_playSessions[channelId],
-            player: 'site',
-            player_type: 'site',
-            user_id: parseInt(AddUser_UsernameArray[0].id, 10)
+    //Drop campaigns are keyed by game, an event without the category credits points but no drop
+    //progress, and spade only reads the event out of a batch array
+    var events = [
+        {
+            event: 'minute-watched',
+            properties: {
+                broadcast_id: Presence_broadcasts[channelId] ? Presence_broadcasts[channelId] : '',
+                channel: Presence_logins[channelId],
+                channel_id: channelId,
+                client_app: 'twilight',
+                client_time: new Date().toISOString(),
+                device_id: Presence_DeviceId(),
+                game: Presence_gameNames[channelId] ? Presence_gameNames[channelId] : '',
+                game_id: Presence_gameIds[channelId] ? Presence_gameIds[channelId] : '',
+                hidden: false,
+                is_live: true,
+                live: true,
+                location: 'channel',
+                logged_in: true,
+                login: AddUser_UsernameArray[0].name,
+                minutes_logged: Presence_minutes[channelId],
+                muted: false,
+                platform: 'web',
+                play_session_id: Presence_playSessions[channelId],
+                player: 'site',
+                player_type: 'site',
+                user_id: parseInt(AddUser_UsernameArray[0].id, 10)
+            }
         }
-    };
+    ];
 
     Presence_Post(
         channelId,
         'watch',
-        'data=' + encodeURIComponent(btoa(JSON.stringify(event))),
+        'data=' + encodeURIComponent(btoa(JSON.stringify(events))),
         Presence_spadeUrl,
         Presence_spadeHeaders
     );
@@ -275,7 +298,18 @@ function Presence_Status(channelId) {
     if (!Presence_sessions[channelId]) {
         Presence_sessions[channelId] = Presence_SessionId(16);
         Presence_counts[channelId] = 0;
-        OSInterface_PresenceLog('watching channel_id=' + channelId + ' session=' + Presence_sessions[channelId]);
+        OSInterface_PresenceLog(
+            'watching channel_id=' +
+                channelId +
+                ' session=' +
+                Presence_sessions[channelId] +
+                ' broadcast=' +
+                (Presence_broadcasts[channelId] ? Presence_broadcasts[channelId] : 'none') +
+                ' game=' +
+                (Presence_gameNames[channelId] ? Presence_gameNames[channelId] : 'none') +
+                '/' +
+                (Presence_gameIds[channelId] ? Presence_gameIds[channelId] : 'none')
+        );
     }
 
     Presence_counts[channelId]++;
@@ -288,6 +322,12 @@ function Presence_Points(channelId) {
     Presence_pointsDueAt[channelId] = new Date().getTime() + Presence_pointsMs;
 
     Presence_Post(channelId, 'points', Presence_pointsMessage.replace('%l', Presence_logins[channelId]));
+}
+
+function Presence_Drops(channelId) {
+    Presence_dropsDueAt[channelId] = new Date().getTime() + Presence_pointsMs;
+
+    Presence_Post(channelId, 'drops', Presence_dropsMessage.replace('%c', channelId));
 }
 
 function Presence_Claim(channelId, claimId) {
@@ -351,6 +391,77 @@ function Presence_ReadPoints(channelId, text) {
     if (points.availableClaim && points.availableClaim.id) Presence_Claim(channelId, points.availableClaim.id);
 }
 
+function Presence_ReadDrops(channelId, text) {
+    var campaigns = null,
+        groups,
+        logged,
+        i = 0,
+        j = 0;
+
+    try {
+        var obj = JSON.parse(text);
+
+        campaigns = obj && obj.data ? obj.data.channelDropCampaignsProgress : null;
+    } catch (e) {}
+
+    if (Main_A_includes_B(text, '"challenge"')) {
+        OSInterface_PresenceLog('drop channel_id=' + channelId + ' challenged body=' + text.substring(0, 200));
+        return;
+    }
+
+    if (!campaigns || !campaigns.length) {
+        if (Presence_dropWatched[channelId] === undefined) {
+            Presence_dropWatched[channelId] = -1;
+            OSInterface_PresenceLog('drop channel_id=' + channelId + ' campaigns=0');
+        }
+
+        return;
+    }
+
+    for (i = 0; i < campaigns.length; i++) {
+        groups = campaigns[i].rewardGroups ? campaigns[i].rewardGroups : [];
+        logged = false;
+
+        for (j = 0; j < groups.length; j++) {
+            if (!groups[j] || !groups[j].self) continue;
+
+            Presence_LogDrop(channelId, campaigns[i], groups[j], groups[j].self);
+            logged = true;
+        }
+
+        if (!logged) Presence_LogDrop(channelId, campaigns[i], campaigns[i], campaigns[i].self);
+    }
+}
+
+function Presence_LogDrop(channelId, campaign, group, self) {
+    var key = channelId + '|' + (group && group.id ? group.id : campaign.id),
+        required = group && group.progressCriteria && group.progressCriteria.requirements ? group.progressCriteria.requirements.minutesWatched : 0,
+        watched = self && self.currentMinutesWatched ? self.currentMinutesWatched : 0,
+        previous = Presence_dropWatched[key];
+
+    if (Object.keys(Presence_dropWatched).length > 50) Presence_dropWatched = {};
+
+    Presence_dropWatched[key] = watched;
+
+    OSInterface_PresenceLog(
+        'drop channel_id=' +
+            channelId +
+            ' broadcast=' +
+            (Presence_broadcasts[channelId] ? Presence_broadcasts[channelId] : 'none') +
+            ' campaign=' +
+            campaign.name +
+            ' watched=' +
+            watched +
+            '/' +
+            required +
+            (previous !== undefined ? ' gained=' + (watched - previous) : '') +
+            ' status=' +
+            (self ? self.status : 'none') +
+            ' connected=' +
+            (group && group.isAccountConnected !== undefined ? group.isAccountConnected : campaign.isAccountConnected)
+    );
+}
+
 function Presence_Result(responseObj, key, id) {
     var request = Presence_pending[id] ? Presence_pending[id] : {channel: '?', kind: '?'};
 
@@ -377,6 +488,7 @@ function Presence_Result(responseObj, key, id) {
 
     if (request.kind === 'status') Presence_dueAt[request.channel] = Presence_NextDue(text);
     else if (request.kind === 'points') Presence_ReadPoints(request.channel, text);
+    else if (request.kind === 'drops') Presence_ReadDrops(request.channel, text);
 }
 
 function Presence_Error(responseObj, key, id) {
