@@ -438,7 +438,25 @@ function Presence_ReadInventory(text) {
             if (!drop) continue;
 
             if (!drop.dropInstanceID) {
-                if (!drop.isClaimed) pending++;
+                if (!drop.isClaimed) {
+                    pending++;
+
+                    if (pending < 5) {
+                        OSInterface_PresenceLog(
+                            'inventory unearned campaign=' +
+                                (campaigns[i].name ? campaigns[i].name : campaigns[i].id) +
+                                ' drop=' +
+                                (drops[j].name ? drops[j].name : drops[j].id) +
+                                ' connected=' +
+                                (campaigns[i].self ? campaigns[i].self.isAccountConnected : campaigns[i].isAccountConnected) +
+                                ' campaignkeys=' +
+                                Object.keys(campaigns[i]).join(',') +
+                                ' selfkeys=' +
+                                Object.keys(drop).join(',')
+                        );
+                    }
+                }
+
                 continue;
             }
 
