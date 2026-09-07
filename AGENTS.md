@@ -151,3 +151,138 @@ rsync -a --delete app/ apk/app/src/main/assets/app/   # never skip
 
 A web-app-only change still needs the whole cycle: the assets are baked into the APK, so there is
 no way to push JS to the device without rebuilding and reinstalling.
+
+# The low-latency feature
+
+This fork's main purpose. Goal: sit as close to the live edge as the stream's delivery allows,
+without buffer-underrun stutters. Latency currently runs ~1.3–1.6 s live-to-broadcast on an EU
+stream with a 0.25–0.5 s cushion, which is ahead of the browser on the same stream.
+
+## Why the control target is the buffer, not the live offset
+
+Media3's stock `LivePlaybackSpeedControl` steers toward a *live offset* target. That cannot see
+delivery-side shortfalls: the offset can look fine while the buffer is about to run dry, and the
+right offset differs per stream and per origin, so it needs hand-tuning for each.
+
+`apk/app/src/main/java/com/fgl27/twitch/TwitchLivePlaybackSpeedControl.java` replaces it and steers
+the **windowed minimum of the buffered duration** toward a cushion. The buffer running dry is what
+actually stalls playback, and the windowed minimum sizes the cushion from the stream's own delivery
+jitter before the first stall happens. `getTargetLiveOffsetUs()` deliberately returns `TIME_UNSET`
+and `setTargetLiveOffsetOverrideUs` is a no-op.
+
+## How the controller works
+
+- **Window**: 10 buckets × 1000 ms, each holding that second's minimum buffered duration; the
+  control variable is the minimum across all buckets.
+- **Error and gain**: `error = windowedMin − (cushion + stallExtra)`, deadband ±50 ms, proportional
+  factor `0.1 per second of error`, clamped to the `LiveConfiguration` speed range. Updates are rate
+  limited to one per 1500 ms.
+- **Arming**: samples from the startup fill ramp are not delivery jitter and must never enter the
+  window. The controller stays at 1.0× until the buffer stops setting new maxima for 2000 ms *and*
+  is within 200 ms of its peak, or a 10 s deadline expires.
+- **Warmup asymmetry**: until one full window of real data exists, slowing below 1.0× is forbidden
+  (`minSpeed = 1f`) while shaving above it is allowed — the window's early lows are fill artifacts.
+- **Stall response**: `notifyRebuffer()` adds a 250 ms bump to `stallExtra` (cap 1500 ms), and
+  re-arms the window, because a post-stall refill is another fill ramp and leaving the empty buffer
+  in the window would charge the same stall twice — that double-charge used to make the player slow
+  *down* right after a stutter instead of catching up. Repeat stalls escalate the hold before decay
+  (`120 s × min(streak, 8)`), then `stallExtra` decays at 25 ms per second back toward the user's
+  floor.
+- **Speed output**: glides by 0.01 per update and snaps to exactly 1.0×, where the audio stretcher
+  is bypassed. Each speed change reconfigures the stretcher audibly, so the number of changes
+  matters as much as their size.
+
+## Where the cushion comes from
+
+`HlsMediaSource.updateLiveConfiguration` (in the Media3 fork) computes, for `LowLatency == 1`:
+
+```
+targetOffsetMs = userTargetMs + originCushionExtraMs()
+maxOffsetMs    = targetOffsetMs + 1500
+minPlaybackSpeed = 0.97   maxPlaybackSpeed = 1.05
+```
+
+`userTargetMs` is the `ll_target` setting (`0s, 0.25s, 0.5s, 0.75s, 1s, 1.5s, 2s, 3s`, default
+`1s`). The `maxOffsetMs` cap exists because an uncapped target let latency ratchet upward over time.
+
+`originCushionExtraMs` scales the cushion by how far away the stream's origin is:
+`Tools.ProbeIngestRtts()` fetches Twitch's ingest directory at startup and TCP-connects to each
+cluster twice, keeping the worst RTT per origin family. `Tools.OriginCushionExtraMs` then returns
+`min(1000, round(2.5 × rtt))`, or `-1` while the probe has not answered (the fork retries on the
+next playlist refresh rather than caching a wrong value), falling back to the worst known family for
+an unseen origin. The origin comes from `ORIGIN="…"` in the multivariant playlist that was actually
+loaded — reading it from a stale playlist once left a Tokyo stream running for two hours on an
+EU-sized cushion.
+
+The factor 2.5 was fitted against logged drawdowns across eun/euw/use/usw/apn: the observed
+worst-case shortfall was ≈ `131 ms + 2.24 × RTT`, so 2.5 covers it with a small margin.
+
+Each player slot owns its own controller and cushion resolver, and both must travel with the player
+in `ReUsePlayer` — a promotion that swapped the player but not the controller once left the on-screen
+readout showing a dead controller's speed.
+
+## Audio during catch-up
+
+Sonic's time stretching crackles at the splice points when speed changes. Pitch-follows-speed was
+tried and rejected — audible and annoying on music. Instead the fork uses **Signalsmith Stretch**
+through JNI (`apk/app/src/main/cpp/`, MIT, vendored under `third_party/`), wired up by
+`audio/SignalsmithAudioProcessor.java` and friends: constant pitch, no crackle, ~5 % of one core,
+100 ms block / 40 ms interval, and it logs `audio-stretcher=signalsmith` or `=sonic-fallback` at
+startup.
+
+`DefaultAudioSink` drains and flushes on every playback-parameter change, which reset the stretcher
+and produced a microstutter per speed step. The processor distinguishes a parameter-change flush
+(preceded by `queueEndOfStream`) from a seek flush, keeps native state across the former, and stays
+active at 1.00×.
+
+## On-screen readout
+
+The player info line shows a quadruplet: `1.54 | 1.32+0.15 | 1.00x` — measured live-to-broadcast,
+then the effective cushion target plus current jitter, then the applied speed. Rendered in
+`Play.js` from `getVideoStatus` elements 10 (adjusted speed), 11 (effective target =
+`targetOffsetMs + stallExtra`) and 12 (jitter EMA of `buffer − windowedMin`).
+
+## Instrumentation
+
+`LL_DIAG` in `PlayerActivity.java` is `true` and gates all `TwitchLL` logging **in release builds
+too**, deliberately. The per-tick heartbeat is the main data source:
+
+```
+raw= shown= edgeDist= buf= pp= pos= ctlMin= ctlStallX= ctlSpeed= target= lowLat= targetMs= origin= extraMs= speedAdj=
+```
+
+`ctlMin` is the windowed minimum, `ctlStallX` the current stall extra, `ctlSpeed` the controller's
+output, `target`/`targetMs` the effective and configured cushions. Event lines carry a `p<slot>`
+prefix:
+
+- `STALL pos= buf= inFlight= loadAgeMs= loadUri= sinceMediaDoneMs= sinceManifestMs=` — enough to
+  tell a delivery stall (a load in flight, aged) from a local one (nothing in flight).
+- `STALL-RECOVERED durMs=`
+- `LOAD-RETRY`, `LOAD-COMPLETED (SLOW-LOAD >4s)`, `LOAD-CANCELED`, `LOAD-ERROR`
+- `AUDIO-UNDERRUN bufMs= sinceFeedMs=` — the audio path starving, which is *not* a buffer
+  underrun and has a different cause.
+- `DROPPED-FRAMES count= elapsedMs=`
+
+## Findings that constrain any redesign
+
+- **Stalls are usually not our fault.** Most observed stutters were Twitch-side delivery gaps
+  (visible as an aged in-flight load) or, on this device, the Shield's Dolby MS12 path: with HDMI
+  audio output set to Dolby, an `AUDIO_FORMAT_E_AC3` direct-output thread burned ~19 % of a core and
+  produced regular audio underruns. Switching the Shield's HDMI output to PCM took HAL CPU to zero
+  and audio underruns to zero. Any latency experiment must control for that setting.
+- **Approaches already tried and rejected**: instantaneous buffer as the control variable (too
+  noisy); a windowed *average* instead of the minimum (hides the drawdowns that actually stall);
+  magnitude-based outlier filtering of the jitter window (fragile — startup and post-stall ramps are
+  excluded by causal markers instead); pitch modulation for crackle-free catch-up.
+- **PiP/multi**: each player slot runs its own controller; two 1080p streams on this device can
+  starve each other.
+
+## Open question: converging on the optimal cushion
+
+The cushion floor is still a user setting (`ll_target`) plus a static origin term. 0.25 s works on
+an EU stream, 0.5 s on a US one, and neither number is derived — the user picked them by
+observation. What is missing is a mechanism that *searches* for the lowest cushion a given stream
+sustains without underruns, and that re-searches when conditions change. The stall bump is only the
+reactive half of such a loop: it raises the cushion after a stall and decays back to the floor, but
+nothing ever probes below the floor, so a stream that could run at 0.1 s never gets there, and the
+decay makes a genuinely bad stream stall again every couple of minutes.
