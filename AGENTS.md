@@ -27,6 +27,47 @@ official app.
 - `apk/app/.cxx/` and `apk/.kotlin/` — native/Kotlin build artifacts, listed in
   `.git/info/exclude`. Never stage them; an earlier session committed 149 of these by accident.
 
+## The Media3 fork
+
+The player is not a dependency, it is compiled from source alongside the app.
+
+- `.tmp/media` is a clone of `fgl27/media` (a fork of `androidx/media`, base Media3 **1.8**),
+  parked on its `release` branch at upstream commit `4d0e670`.
+- `.tmp/media/.claude/worktrees/twitch-low-latency` is a **git worktree** of that clone on branch
+  `feat/twitch-prefetch-low-latency-dev`, remote `fork` = `RikuXan/media`. This worktree is what the
+  APK links against; the parent clone is only the upstream base.
+
+Wiring, in `apk/settings.gradle`:
+
+```groovy
+gradle.ext.mediaRoot = "$rootDir/../.tmp/media/.claude/worktrees/twitch-low-latency"
+gradle.ext.androidxMediaModulePrefix = 'media3-'
+apply from: new File(gradle.ext.mediaRoot, 'core_settings.gradle')
+```
+
+`core_settings.gradle` `include`s every Media3 library as a source module (`:media3-lib-common`,
+`:media3-lib-exoplayer`, `:media3-lib-exoplayer-hls`, …). So **editing a file in the worktree is
+picked up by the next `./gradlew assembleRelease`** — there is no publish, install or version-bump
+step. The flip side is that a player edit recompiles those modules, so expect a full ~3 minute
+build, and the change must be committed in that worktree separately from the app repo.
+
+### What is patched
+
+Four upstream files differ from `4d0e670`, across six commits:
+
+| File | Change |
+| --- | --- |
+| `libraries/exoplayer_hls/.../hls/playlist/HlsPlaylistParser.java` | Parses `#EXT-X-TWITCH-PREFETCH` (the unadvertised next segments Twitch exposes with `fast_bread=true`) and `#EXT-X-TWITCH-INFO`, and retains all `#EXT` tags on the parsed playlist so consumers can read them. |
+| `libraries/exoplayer_hls/.../hls/playlist/DefaultHlsPlaylistParserFactory.java` | Factory wiring for the parser above. |
+| `libraries/exoplayer_hls/.../hls/HlsMediaSource.java` | The low-latency surface: `Factory.setLowLatencyTargetMs`, the `OriginCushionProvider` interface plus `Factory.setOriginCushionProvider`, `REGEX_TWITCH_ORIGIN` to read `ORIGIN="…"` off the loaded multivariant playlist, `originCushionExtraMs()` with retry-while-unresolved, and `updateLiveConfiguration` computing target/max offset and the speed bounds. |
+| `libraries/exoplayer/.../audio/DefaultAudioSink.java` | A `pitchFollowsSpeed` static toggle, left in place but **unused** — the pitch-modulation approach to catch-up audio was rejected as audible. |
+
+The app side connects to it in `Tools.buildMediaSource(...)`, which calls
+`.setLowLatencyTargetMs(LowLatencyTargetMs)` and
+`.setOriginCushionProvider(LowLatency == 1 ? originCushion : null)` on the HLS factory. The custom
+speed control (`TwitchLivePlaybackSpeedControl`) lives in the **app** repo, not the fork, and is
+attached per player via `ExoPlayer.Builder`.
+
 ## Before every build: sync the web app
 
 ```bash
