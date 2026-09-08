@@ -11,7 +11,7 @@ Fork-local notes for building this app and deploying it to the Nvidia Shield TV 
 | `apk/` | The Android wrapper (Java, Gradle). |
 | `apk/app/src/main/assets/app/` | **Build input only** — a copy of `app/`, gitignored. |
 | `apk/app/src/main/cpp/` | Signalsmith Stretch JNI bridge (needs the NDK). |
-| `.tmp/media/.claude/worktrees/twitch-low-latency` | The patched Media3/ExoPlayer fork this build links against. |
+| `../media` (`~/Code/github/fgl27/media`) | The patched Media3/ExoPlayer fork this build links against, a sibling checkout. |
 | `.tmp/docker/` | Dockerfiles for the two build images. |
 | `.tmp/logs/twitchll-live.log` | Continuous `TwitchLL` capture written by the `stv-logcat` container. |
 
@@ -21,8 +21,6 @@ official app.
 
 ## Files that must stay uncommitted
 
-- `apk/settings.gradle` — points `gradle.ext.mediaRoot` at the local Media3 fork worktree. The
-  committed value is upstream's relative path and does not resolve here.
 - `apk/app/google-services.json` — untracked local stub; the build fails without it.
 - `apk/app/.cxx/` and `apk/.kotlin/` — native/Kotlin build artifacts, listed in
   `.git/info/exclude`. Never stage them; an earlier session committed 149 of these by accident.
@@ -31,25 +29,26 @@ official app.
 
 The player is not a dependency, it is compiled from source alongside the app.
 
-- `.tmp/media` is a clone of `fgl27/media` (a fork of `androidx/media`, base Media3 **1.8**),
-  parked on its `release` branch at upstream commit `4d0e670`.
-- `.tmp/media/.claude/worktrees/twitch-low-latency` is a **git worktree** of that clone on branch
-  `feat/twitch-prefetch-low-latency-dev`, remote `fork` = `RikuXan/media`. This worktree is what the
-  APK links against; the parent clone is only the upstream base.
+`~/Code/github/fgl27/media` is a clone of `fgl27/media` (a fork of `androidx/media`, base Media3
+**1.8**) on branch `feat/twitch-prefetch-low-latency-dev`, six commits above upstream `4d0e670`.
+Remotes: `origin` = `github.com/fgl27/media`, `fork` = `RikuXan/media` (where the branch is pushed).
+
+It sits beside this repo, which is the layout `apk/settings.gradle` already expects — no local
+modification of that file is needed.
 
 Wiring, in `apk/settings.gradle`:
 
 ```groovy
-gradle.ext.mediaRoot = "$rootDir/../.tmp/media/.claude/worktrees/twitch-low-latency"
+gradle.ext.mediaRoot = "$rootDir/../../media"
 gradle.ext.androidxMediaModulePrefix = 'media3-'
 apply from: new File(gradle.ext.mediaRoot, 'core_settings.gradle')
 ```
 
 `core_settings.gradle` `include`s every Media3 library as a source module (`:media3-lib-common`,
-`:media3-lib-exoplayer`, `:media3-lib-exoplayer-hls`, …). So **editing a file in the worktree is
+`:media3-lib-exoplayer`, `:media3-lib-exoplayer-hls`, …). So **editing a file in that clone is
 picked up by the next `./gradlew assembleRelease`** — there is no publish, install or version-bump
 step. The flip side is that a player edit recompiles those modules, so expect a full ~3 minute
-build, and the change must be committed in that worktree separately from the app repo.
+build, and the change must be committed in that repo separately from the app repo.
 
 ### What is patched
 
@@ -92,13 +91,23 @@ Two images, both amd64 under Podman-backed Docker:
 R=/Users/philipp.holler/Code/github/fgl27/SmartTwitchTV
 docker rm -f stv-build 2>/dev/null
 docker run -d --name stv-build \
-  -v "$R":/project \
+  -v /Users/philipp.holler/Code/github/fgl27:/work \
   -v stv-gradle-cache:/root/.gradle \
   -v stv-android-config:/root/.android \
-  -w /project/apk stv-android-build-ndk ./gradlew assembleRelease --no-daemon
-docker wait stv-build
+  -w /work/SmartTwitchTV/apk stv-android-build-ndk ./gradlew assembleRelease --no-daemon
+code=$(docker wait stv-build)
 docker logs --tail 3 stv-build
+[ "$code" = 0 ] || { echo "build failed (exit $code)"; exit 1; }
 ```
+
+`docker wait` writes the container's exit code to stdout but exits 0 itself, so a script relying on
+`set -e` alone will sail past a failed build and sign and deploy the **previous** APK. Check the
+captured code.
+
+The mount is the **parent** directory of both checkouts, not the app repo, because
+`mediaRoot` resolves to a sibling of it. Mounting only `SmartTwitchTV` makes
+`$rootDir/../../media` land on the image's own empty `/media`, and the build fails in settings
+evaluation.
 
 Detached plus `docker wait` rather than `docker run --rm` in the foreground: a full build takes
 about three minutes and an interactive run tends to hit tool timeouts. Add `assembleDebug` to the
@@ -179,9 +188,9 @@ did nothing.
   lands. `origin` is upstream `fgl27/SmartTwitchTV`; never push there.
 - Never push to `feat/low-latency-improvements` or `feat/twitch-prefetch-low-latency` — those are
   frozen snapshots referenced from a public upstream issue.
-- The Media3 fork has its own remote and branch (`feat/twitch-prefetch-low-latency-dev` on
-  `RikuXan/media`). Changing player internals means committing in that worktree as well, and the
-  APK build picks it up through `mediaRoot`.
+- The Media3 fork is its own repo with its own remote and branch
+  (`feat/twitch-prefetch-low-latency-dev` on `RikuXan/media`). Changing player internals means
+  committing there as well, and the APK build picks it up through `mediaRoot`.
 
 ## Full cycle
 
