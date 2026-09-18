@@ -546,6 +546,8 @@ public final class Tools {
 
     public static class OriginCushion implements HlsMediaSource.OriginCushionProvider {
 
+        final TwitchBufferCushion adaptiveCushion = new TwitchBufferCushion();
+        final TwitchDeliveryProgress delivery = new TwitchDeliveryProgress(SystemClock::elapsedRealtime);
         public volatile String code = "";
         public volatile int extraMs = 0;
 
@@ -554,7 +556,9 @@ public final class Tools {
             code = originCode != null ? originCode : "";
             int resolved = OriginCushionExtraMs(originCode);
             extraMs = Math.max(0, resolved);
-            return resolved;
+            if (resolved < 0) return resolved;
+            adaptiveCushion.seedOriginMs(resolved);
+            return 0;
         }
     }
 
@@ -587,19 +591,21 @@ public final class Tools {
         boolean speedAdjustment,
         String mainPlaylist,
         String userAgent,
-        OriginCushion originCushion
+        OriginCushion originCushion,
+        TwitchBroadcastLatency broadcastLatency
     ) {
         if (Type == 1) {
-            //Twitch only serves low latency playlists (prefetch segments) when asked via fast_bread,
-            //the multivariant the web app fetched was requested without it so force a refetch
             if (LowLatency == 1 && uri.toString().contains("fast_bread=false")) {
                 uri = Uri.parse(uri.toString().replace("fast_bread=false", "fast_bread=true"));
-                mainPlaylist = "";
             }
 
-            return new HlsMediaSource.Factory(getDefaultDataSourceFactory(mainPlaylist, uri, userAgent))
+            //SERVER-TIME must be anchored on a fresh response, never the WebView's cached playlist.
+            DefaultHttpDataSource.Factory httpFactory = getDefaultDataSourceFactory("", uri, userAgent);
+            return new HlsMediaSource.Factory(() -> new TwitchProgressDataSource(
+                httpFactory.createDataSource(), originCushion.delivery))
                 .setAllowChunklessPreparation(true)
                 .setLowLatency(LowLatency)
+                .setPlaylistParserFactory(new TwitchLatencyPlaylistParserFactory(LowLatency == 1, broadcastLatency))
                 .setLowLatencyTargetMs(LowLatencyTargetMs)
                 .setOriginCushionProvider(LowLatency == 1 ? originCushion : null)
                 .setspeedAdjustment(speedAdjustment)
