@@ -90,6 +90,7 @@ repositories {
 }
 
 dependencies {
+    testImplementation 'junit:junit:4.13.2'
     //Exoplayer
     implementation project(':media3-lib-exoplayer')
     implementation project(':media3-lib-ui')
