@@ -69,6 +69,7 @@ import android.widget.Toast;
 import androidx.annotation.NonNull;
 import androidx.media3.common.C;
 import androidx.media3.common.Format;
+import androidx.media3.common.Metadata;
 import androidx.media3.common.PlaybackException;
 import androidx.media3.common.PlaybackParameters;
 import androidx.media3.common.Player;
@@ -295,6 +296,7 @@ public class PlayerActivity extends Activity {
 
         TwitchLivePlaybackSpeedControl SpeedControl;
         Tools.OriginCushion originCushion = new Tools.OriginCushion();
+        TwitchBroadcastLatency broadcastLatency = new TwitchBroadcastLatency();
 
         long ResumePosition;
         long LatencyOffSet;
@@ -373,6 +375,7 @@ public class PlayerActivity extends Activity {
     protected void onCreate(Bundle savedInstanceState) {
         if (!onCreateReady) setTheme(R.style.AppTheme);
         super.onCreate(savedInstanceState);
+        if (LL_DIAG) TwitchDiagnosticLog.initialize(this);
 
         //On create is called onResume so prevent it if already set
         if (!onCreateReady) {
@@ -586,6 +589,10 @@ public class PlayerActivity extends Activity {
         PlayerObj[PlayerObjPosition].originCushion = PlayerObj[4].originCushion;
         PlayerObj[4].originCushion = tempOriginCushion;
 
+        TwitchBroadcastLatency tempBroadcastLatency = PlayerObj[PlayerObjPosition].broadcastLatency;
+        PlayerObj[PlayerObjPosition].broadcastLatency = PlayerObj[4].broadcastLatency;
+        PlayerObj[4].broadcastLatency = tempBroadcastLatency;
+
         PlayerObj[PlayerObjPosition].playerView.setPlayer(PlayerObj[PlayerObjPosition].player);
         PlayerObj[PlayerObjPosition].player.setPlayWhenReady(true);
 
@@ -640,18 +647,35 @@ public class PlayerActivity extends Activity {
             DefaultRenderersFactory renderersFactory = new SignalsmithRenderersFactory(this);
             if (BLACKLISTED_CODECS != null) renderersFactory.setMediaCodecSelector(BLACKLISTED_CODECS);
 
+            PlayerObj[PlayerObjPosition].SpeedControl = new TwitchLivePlaybackSpeedControl();
             PlayerObj[PlayerObjPosition].player = new ExoPlayer.Builder(this, renderersFactory)
                 .setTrackSelector(PlayerObj[PlayerObjPosition].trackSelector)
                 .setLoadControl(
-                    Tools.getLoadControl(
+                    new TwitchLoadControl(
                         BUFFER_SIZE[PlayerObj[PlayerObjPosition].Type - 1],
-                        DeviceRam / PlayerObj[PlayerObjPosition].loadControlRamDivider
+                        DeviceRam / PlayerObj[PlayerObjPosition].loadControlRamDivider,
+                        PlayerObj[PlayerObjPosition].SpeedControl
                     )
                 )
                 .setLivePlaybackSpeedControl(
-                    PlayerObj[PlayerObjPosition].SpeedControl = new TwitchLivePlaybackSpeedControl()
+                    PlayerObj[PlayerObjPosition].SpeedControl
                 )
                 .build();
+
+            if (LL_DIAG) {
+                for (int i = 0; i < PlayerObj[PlayerObjPosition].player.getRendererCount(); i++) {
+                    androidx.media3.exoplayer.Renderer renderer = PlayerObj[PlayerObjPosition].player.getRenderer(i);
+                    if (renderer instanceof androidx.media3.exoplayer.mediacodec.MediaCodecRenderer
+                            && (renderer.getTrackType() == C.TRACK_TYPE_VIDEO || renderer.getTrackType() == C.TRACK_TYPE_AUDIO)) {
+                        ((androidx.media3.exoplayer.mediacodec.MediaCodecRenderer) renderer)
+                            .setTrackTimingListener(TwitchDiagnosticLog::i);
+                    }
+                    if (renderer instanceof androidx.media3.exoplayer.video.MediaCodecVideoRenderer) {
+                        ((androidx.media3.exoplayer.video.MediaCodecVideoRenderer) renderer)
+                            .setReadinessDiagnosticListener(TwitchDiagnosticLog::i);
+                    }
+                }
+            }
 
             PlayerObj[PlayerObjPosition].Listener = new PlayerEventListener(PlayerObjPosition);
             PlayerObj[PlayerObjPosition].player.addListener(PlayerObj[PlayerObjPosition].Listener);
@@ -662,7 +686,9 @@ public class PlayerActivity extends Activity {
         }
 
         PlayerObj[PlayerObjPosition].player.setPlayWhenReady(true);
-        if (PlayerObj[PlayerObjPosition].SpeedControl != null) PlayerObj[PlayerObjPosition].SpeedControl.reset();
+        if (PlayerObj[PlayerObjPosition].SpeedControl != null) {
+            PlayerObj[PlayerObjPosition].SpeedControl.useCushion(PlayerObj[PlayerObjPosition].originCushion.adaptiveCushion);
+        }
         PlayerObj[PlayerObjPosition].player.setMediaSource(PlayerObj[PlayerObjPosition].mediaSources, PlayerObj[PlayerObjPosition].ResumePosition);
 
         PlayerObj[PlayerObjPosition].player.prepare();
@@ -1252,6 +1278,8 @@ public class PlayerActivity extends Activity {
                 () -> {
                     PlayerCurrentPosition = PlayerObj[0].player != null ? PlayerObj[0].player.getCurrentPosition() : 0L;
 
+                    if (PlayerObj[0].player != null && PlayerObj[0].Type == 1) TwitchNetworkClock.refreshIfDue();
+
                     if (LL_DIAG && PlayerObj[0].player != null && PlayerObj[0].Type == 1) {
                         long dur = PlayerObj[0].player.getDuration();
                         long pos = PlayerObj[0].player.getCurrentPosition();
@@ -1261,23 +1289,29 @@ public class PlayerActivity extends Activity {
                             tl.getWindow(PlayerObj[0].player.getCurrentMediaItemIndex(), CatchupWindow);
                             if (CatchupWindow.liveConfiguration != null) target = CatchupWindow.liveConfiguration.targetOffsetMs;
                         }
-                        Log.i(
-                            "TwitchLL",
-                            "raw=" + PlayerObj[0].player.getCurrentLiveOffset() +
-                            " shown=" + getCurrentLiveOffset(0, dur, pos) +
+                        TwitchDiagnosticLog.i("raw=" + PlayerObj[0].player.getCurrentLiveOffset() +
+                            " shown=" + PlayerObj[0].broadcastLatency.getLatencyMs() +
+                            " ltbSampleAgeMs=" + PlayerObj[0].broadcastLatency.getSampleAgeMs() +
+                            " ltbServerTimeMs=" + PlayerObj[0].broadcastLatency.getServerTimeMs() +
+                            " ltbPtsUs=" + PlayerObj[0].broadcastLatency.getPresentationTimeUs() +
                             " edgeDist=" + (dur - pos) +
                             " buf=" + PlayerObj[0].player.getTotalBufferedDuration() +
                             " pp=" + PlayerObj[0].player.getPlaybackParameters().speed +
                             " pos=" + pos +
                             " ctlMin=" + (PlayerObj[0].SpeedControl != null ? PlayerObj[0].SpeedControl.getWindowedMinMs() : -1) +
                             " ctlStallX=" + (PlayerObj[0].SpeedControl != null ? PlayerObj[0].SpeedControl.getStallExtraMs() : -1) +
+                            " ctlLearned=" + (PlayerObj[0].SpeedControl != null ? PlayerObj[0].SpeedControl.getLearnedCushionMs() : -1) +
+                            " ctlConfirmed=" + (PlayerObj[0].SpeedControl != null && PlayerObj[0].SpeedControl.isReserveConfirmed()) +
+                            (PlayerObj[0].SpeedControl != null ? PlayerObj[0].SpeedControl.getShadowSnapshot() : "") +
+                            " ctlProbe=" + (PlayerObj[0].SpeedControl != null && PlayerObj[0].SpeedControl.isProbingCushion()) +
+                            " ctlProbeWaitMs=" + (PlayerObj[0].SpeedControl != null ? PlayerObj[0].SpeedControl.getProbeIntervalMs() : -1) +
                             " ctlSpeed=" + (PlayerObj[0].SpeedControl != null ? PlayerObj[0].SpeedControl.getAdjustedSpeed() : -1) +
                             " target=" + target +
                             " lowLat=" + mLowLatency +
                             " targetMs=" + mLowLatencyTargetMs +
                             " origin=" + PlayerObj[0].originCushion.code +
                             " extraMs=" + PlayerObj[0].originCushion.extraMs +
-                            " speedAdj=" + speedAdjustment
+                            " speedAdj=" + speedAdjustment + PlayerObj[0].originCushion.delivery.snapshot()
                         );
                     }
 
@@ -2789,7 +2823,8 @@ public class PlayerActivity extends Activity {
                                 speedAdjustment,
                                 mainPlaylistString,
                                 userAgent,
-                                PlayerObj[PlayerObjPosition].originCushion
+                                PlayerObj[PlayerObjPosition].originCushion = new Tools.OriginCushion(),
+                                PlayerObj[PlayerObjPosition].broadcastLatency = new TwitchBroadcastLatency()
                             );
 
                             SetupPlayer(PlayerObjPosition);
@@ -2833,7 +2868,8 @@ public class PlayerActivity extends Activity {
                         speedAdjustment,
                         mainPlaylistString,
                         userAgent,
-                        PlayerObj[position].originCushion
+                        PlayerObj[position].originCushion = new Tools.OriginCushion(),
+                        PlayerObj[position].broadcastLatency = new TwitchBroadcastLatency()
                     );
 
                     SetupPlayer(position);
@@ -3149,7 +3185,8 @@ public class PlayerActivity extends Activity {
                     speedAdjustment,
                     mainPlaylistString,
                     userAgent,
-                    PlayerObj[4].originCushion
+                    PlayerObj[4].originCushion = new Tools.OriginCushion(),
+                    PlayerObj[4].broadcastLatency = new TwitchBroadcastLatency()
                 );
 
                 Set_PlayerObj(
@@ -3198,7 +3235,8 @@ public class PlayerActivity extends Activity {
                     speedAdjustment,
                     mainPlaylistString,
                     userAgent,
-                    PlayerObj[0].originCushion
+                    PlayerObj[0].originCushion = new Tools.OriginCushion(),
+                    PlayerObj[0].broadcastLatency = new TwitchBroadcastLatency()
                 );
 
                 VideoWebHolder.bringChildToFront(VideoHolder);
@@ -3232,7 +3270,8 @@ public class PlayerActivity extends Activity {
                     speedAdjustment,
                     mainPlaylistString,
                     userAgent,
-                    PlayerObj[0].originCushion
+                    PlayerObj[0].originCushion = new Tools.OriginCushion(),
+                    PlayerObj[0].broadcastLatency = new TwitchBroadcastLatency()
                 );
 
                 PlayerViewScreensLayout = Tools.BasePreviewLayout(bottom, right, left, web_height, ScreenSize, bigger);
@@ -3533,7 +3572,7 @@ public class PlayerActivity extends Activity {
 
             runOnUiThread(() -> {
                 long buffer = 0L;
-                long LiveOffset = 0L;
+                long LiveOffset = C.TIME_UNSET;
                 long Duration = 0L;
                 long Position = 0L;
                 long BufferTarget = 0L;
@@ -3544,8 +3583,7 @@ public class PlayerActivity extends Activity {
                     Duration = PlayerObj[0].player.getDuration();
                     Position = PlayerObj[0].player.getCurrentPosition();
 
-                    //Buffered content already exists, the real latency can never be below it
-                    LiveOffset = Math.max(getCurrentLiveOffset(0, Duration, Position), buffer);
+                    LiveOffset = PlayerObj[0].broadcastLatency.getLatencyMs();
 
                     if (mLowLatency == 1) {
                         Timeline tl = PlayerObj[0].player.getCurrentTimeline();
@@ -3578,7 +3616,7 @@ public class PlayerActivity extends Activity {
                             droppedFrames, //2
                             DroppedFramesTotal, //3
                             Tools.getTime(buffer), //4
-                            Tools.getTime(LiveOffset), //5
+                            LiveOffset < 0 ? "—" : Tools.getTime(LiveOffset), //5
                             Tools.GetCounters(PingValue, PingValueAVG, PingCounter), //6
                             (buffer / 1000.0), //7
                             Duration, //8
@@ -3687,7 +3725,8 @@ public class PlayerActivity extends Activity {
                     speedAdjustment,
                     mainPlaylistString,
                     userAgent,
-                    PlayerObj[position].originCushion
+                    PlayerObj[position].originCushion = new Tools.OriginCushion(),
+                    PlayerObj[position].broadcastLatency = new TwitchBroadcastLatency()
                 );
 
                 SetupPlayer(position);
@@ -3774,6 +3813,7 @@ public class PlayerActivity extends Activity {
         private final int Delay_ms;
         private final int defaultDelayPlayerCheck = 8000;
         private Tracks lastSeenTracks = null;
+        private int metadataDiagnosticCount;
 
         private PlayerEventListener(int position) {
             this.position = position;
@@ -3786,7 +3826,44 @@ public class PlayerActivity extends Activity {
         }
 
         @Override
+        public void onMetadata(@NonNull Metadata metadata) {
+            if (PlayerObj[position].Type != 1) return;
+            boolean accepted = PlayerObj[position].broadcastLatency.onMetadata(metadata);
+            if (LL_DIAG && (metadataDiagnosticCount++ < 3 || metadataDiagnosticCount % 10 == 0)) {
+                ExoPlayer player = PlayerObj[position].player;
+                Timeline timeline = player.getCurrentTimeline();
+                long periodPositionUs = C.TIME_UNSET;
+                if (!timeline.isEmpty()) {
+                    Timeline.Period period = new Timeline.Period();
+                    timeline.getPeriod(player.getCurrentPeriodIndex(), period);
+                    periodPositionUs = player.getCurrentPosition() * 1000 - period.getPositionInWindowUs();
+                }
+                TwitchDiagnosticLog.i("p" + position + " LTB-CUE ptsUs=" + metadata.presentationTimeUs +
+                    " periodPositionUs=" + periodPositionUs + " bufferMs=" + player.getTotalBufferedDuration() +
+                    " accepted=" + accepted + " " + PlayerObj[position].broadcastLatency.getClockDiagnostic());
+            }
+        }
+
+        @Override
+        public void onPositionDiscontinuity(
+            @NonNull Player.PositionInfo oldPosition,
+            @NonNull Player.PositionInfo newPosition,
+            @Player.DiscontinuityReason int reason
+        ) {
+            if (reason == Player.DISCONTINUITY_REASON_SEEK || reason == Player.DISCONTINUITY_REASON_SEEK_ADJUSTMENT) {
+                PlayerObj[position].broadcastLatency.onSeek();
+            }
+        }
+
+        @Override
         public void onTracksChanged(@NonNull Tracks tracks) {
+            if (LL_DIAG && metadataDiagnosticCount < 3) {
+                for (Tracks.Group group : tracks.getGroups()) {
+                    if (group.getType() == C.TRACK_TYPE_METADATA) {
+                        TwitchDiagnosticLog.i("p" + position + " LTB-TRACK selected=" + group.isSelected() + " supported=" + group.isSupported());
+                    }
+                }
+            }
             //onTracksChanged -> Called when the available or selected tracks change.
             //When the player is already prepare and one changes the MediaSource this will be called before the new MediaSource is prepare
             //So tracks.getGroups().size() will be 0 and getQualities result = null, after 100ms or so this will be again called and all will be fine
@@ -3889,7 +3966,8 @@ public class PlayerActivity extends Activity {
 
     private class AnalyticsEventListener implements AnalyticsListener {
 
-        private final int slot;
+        private final ExoPlayer owner;
+        private final TwitchLivePlaybackSpeedControl control;
         private int lastState = Player.STATE_IDLE;
         private long stallStartMs = -1;
         private int mediaLoadsInFlight;
@@ -3899,7 +3977,34 @@ public class PlayerActivity extends Activity {
         private long lastManifestDoneMs = -1;
 
         AnalyticsEventListener(int slot) {
-            this.slot = slot;
+            owner = PlayerObj[slot].player;
+            control = PlayerObj[slot].SpeedControl;
+        }
+
+        private int currentSlot() {
+            for (int i = 0; i < PlayerObj.length; i++) {
+                if (PlayerObj[i] != null && PlayerObj[i].player == owner) return i;
+            }
+            return -1;
+        }
+
+        private String deliverySnapshot() {
+            int slot = currentSlot();
+            return slot < 0 ? "" : PlayerObj[slot].originCushion.delivery.snapshot();
+        }
+
+        @Override
+        public void onRendererReadyChanged(@NonNull EventTime eventTime, int rendererIndex,
+                int rendererTrackType, boolean isRendererReady) {
+            if (!LL_DIAG) return;
+            String track = rendererTrackType == C.TRACK_TYPE_AUDIO ? "audio"
+                : rendererTrackType == C.TRACK_TYPE_VIDEO ? "video" : "other";
+            TwitchDiagnosticLog.i("p" + currentSlot() + " RENDERER-READY renderer=" + rendererIndex +
+                " rendererId=" + System.identityHashCode(owner.getRenderer(rendererIndex)) +
+                " controlId=" + System.identityHashCode(control) + " track=" + track + " trackType=" + rendererTrackType + " ready=" + isRendererReady +
+                " eventRealtimeMs=" + eventTime.realtimeMs +
+                " pos=" + eventTime.currentPlaybackPositionMs +
+                " buf=" + eventTime.totalBufferedDurationMs + deliverySnapshot());
         }
 
         private String uriTail(LoadEventInfo loadEventInfo) {
@@ -3913,30 +4018,29 @@ public class PlayerActivity extends Activity {
             DroppedFramesTotal += count;
 
             if (LL_DIAG) {
-                Log.i("TwitchLL", "p" + slot + " DROPPED-FRAMES count=" + count + " elapsedMs=" + elapsedMs);
+                TwitchDiagnosticLog.i("p" + currentSlot() + " DROPPED-FRAMES count=" + count + " elapsedMs=" + elapsedMs);
             }
         }
 
         @Override
         public void onPlaybackStateChanged(@NonNull EventTime eventTime, int state) {
-            if (!LL_DIAG) return;
-
             long now = eventTime.realtimeMs;
+            if (state == Player.STATE_READY && control != null) control.onPlaybackRecovered(now);
             if (state == Player.STATE_BUFFERING && lastState == Player.STATE_READY) {
                 stallStartMs = now;
-                Log.i(
-                    "TwitchLL",
-                    "p" + slot +
+                TwitchDiagnosticLog.i("p" + currentSlot() +
                     " STALL pos=" + eventTime.currentPlaybackPositionMs +
                     " buf=" + eventTime.totalBufferedDurationMs +
                     " inFlight=" + mediaLoadsInFlight +
                     " loadAgeMs=" + (mediaLoadsInFlight > 0 && mediaLoadStartMs != -1 ? now - mediaLoadStartMs : -1) +
                     " loadUri=" + (mediaLoadsInFlight > 0 ? mediaLoadUri : "-") +
                     " sinceMediaDoneMs=" + (lastMediaDoneMs != -1 ? now - lastMediaDoneMs : -1) +
-                    " sinceManifestMs=" + (lastManifestDoneMs != -1 ? now - lastManifestDoneMs : -1)
+                    " sinceManifestMs=" + (lastManifestDoneMs != -1 ? now - lastManifestDoneMs : -1) + deliverySnapshot()
                 );
             } else if (state == Player.STATE_READY && stallStartMs != -1) {
-                Log.i("TwitchLL", "p" + slot + " STALL-RECOVERED durMs=" + (now - stallStartMs));
+                TwitchDiagnosticLog.i("p" + currentSlot() + " STALL-RECOVERED durMs=" + (now - stallStartMs) +
+                    " ignoredForLearning=" + (control != null && control.wasStallExcluded()) +
+                    " learnedMs=" + (control != null ? control.getLearnedCushionMs() : -1));
                 stallStartMs = -1;
             }
             lastState = state;
@@ -3951,7 +4055,7 @@ public class PlayerActivity extends Activity {
             mediaLoadUri = uriTail(loadEventInfo);
 
             if (retryCount > 0) {
-                Log.i("TwitchLL", "p" + slot + " LOAD-RETRY n=" + retryCount + " uri=" + mediaLoadUri);
+                TwitchDiagnosticLog.i("p" + currentSlot() + " LOAD-RETRY n=" + retryCount + " uri=" + mediaLoadUri);
             }
         }
 
@@ -3964,9 +4068,7 @@ public class PlayerActivity extends Activity {
                 lastMediaDoneMs = eventTime.realtimeMs;
 
                 if (loadEventInfo.loadDurationMs > 4000) {
-                    Log.i(
-                        "TwitchLL",
-                        "p" + slot +
+                    TwitchDiagnosticLog.i("p" + currentSlot() +
                         " SLOW-LOAD durMs=" + loadEventInfo.loadDurationMs +
                         " bytes=" + loadEventInfo.bytesLoaded +
                         " uri=" + uriTail(loadEventInfo)
@@ -3974,6 +4076,11 @@ public class PlayerActivity extends Activity {
                 }
             } else if (mediaLoadData.dataType == C.DATA_TYPE_MANIFEST) {
                 lastManifestDoneMs = eventTime.realtimeMs;
+                String path = loadEventInfo.uri.getPath();
+                if (path != null && path.startsWith("/api/channel/hls/")) {
+                    TwitchDiagnosticLog.i("p" + currentSlot() + " LTB-MASTER path=" + path +
+                        " durationMs=" + loadEventInfo.loadDurationMs + " bytes=" + loadEventInfo.bytesLoaded);
+                }
             }
         }
 
@@ -3982,17 +4089,19 @@ public class PlayerActivity extends Activity {
             if (!LL_DIAG || mediaLoadData.dataType != C.DATA_TYPE_MEDIA) return;
 
             if (mediaLoadsInFlight > 0) mediaLoadsInFlight--;
-            Log.i("TwitchLL", "p" + slot + " LOAD-CANCELED uri=" + uriTail(loadEventInfo));
+            TwitchDiagnosticLog.i("p" + currentSlot() + " LOAD-CANCELED uri=" + uriTail(loadEventInfo));
         }
 
         @Override
         public void onLoadError(@NonNull EventTime eventTime, @NonNull LoadEventInfo loadEventInfo, @NonNull MediaLoadData mediaLoadData, @NonNull IOException error, boolean wasCanceled) {
+            if (!wasCanceled && control != null &&
+                (mediaLoadData.dataType == C.DATA_TYPE_MANIFEST || mediaLoadData.dataType == C.DATA_TYPE_MEDIA)) {
+                if (TwitchBufferCushion.isUnusualDeliveryError(error)) control.onDeliveryError(eventTime.realtimeMs);
+            }
             if (!LL_DIAG) return;
 
             if (mediaLoadData.dataType == C.DATA_TYPE_MEDIA && mediaLoadsInFlight > 0) mediaLoadsInFlight--;
-            Log.i(
-                "TwitchLL",
-                "p" + slot +
+            TwitchDiagnosticLog.i("p" + currentSlot() +
                 " LOAD-ERROR dataType=" + mediaLoadData.dataType +
                 " canceled=" + wasCanceled +
                 " uri=" + uriTail(loadEventInfo) +
@@ -4003,7 +4112,7 @@ public class PlayerActivity extends Activity {
         @Override
         public void onAudioUnderrun(@NonNull EventTime eventTime, int bufferSize, long bufferSizeMs, long elapsedSinceLastFeedMs) {
             if (LL_DIAG) {
-                Log.i("TwitchLL", "p" + slot + " AUDIO-UNDERRUN bufMs=" + bufferSizeMs + " sinceFeedMs=" + elapsedSinceLastFeedMs);
+                TwitchDiagnosticLog.i("p" + currentSlot() + " AUDIO-UNDERRUN bufMs=" + bufferSizeMs + " sinceFeedMs=" + elapsedSinceLastFeedMs);
             }
         }
 
