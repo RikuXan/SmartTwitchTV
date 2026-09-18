@@ -521,6 +521,20 @@ function OSInterface_gettimepreview() {
     return Main_IsOn_OSInterface ? Android.gettimepreview() : 0;
 }
 
+//public long getsavedtimePP()
+//Android specific: true
+//returns the picture in picture player saved position, kept while the app is in the background
+function OSInterface_getsavedtimePP() {
+    return Main_IsOn_OSInterface ? Android.getsavedtimePP() : 0;
+}
+
+//public long gettimePP()
+//Android specific: false
+//returns the position of the picture in picture player, used by a vod playing in the small window
+function OSInterface_gettimePP() {
+    return Main_IsOn_OSInterface ? Android.gettimePP() : 0;
+}
+
 //public void SetCurrentPositionTimeout()
 //Android specific: true
 //set how fast the get player position handler will refresh

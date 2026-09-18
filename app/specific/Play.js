@@ -484,7 +484,8 @@ function Play_ResumeAfterOnline() {
             //Play_data.data[6] = 'testtt';
             //Play_data.data[14] = 1234;
             if (PlayExtra_PicturePicture) {
-                PlayExtra_Resume(true);
+                if (PlayExtraVod_InPP) PlayExtraVod_Resume();
+                else PlayExtra_Resume(true);
             }
             Play_loadData();
         }
@@ -705,18 +706,13 @@ function Play_ResetStreamInfo() {
     streamGame = null;
     streamViewers = null;
 
-    updateLogoMainDiv = null;
-    updateLogoMainLogo = null;
-
-    updateLogoPPDiv = null;
-    updateLogoPPLogo = null;
-
-    streamTitle1 = null;
-    streamGame1 = null;
-    streamViewers1 = null;
-    streamTitle2 = null;
-    streamGame2 = null;
-    streamViewers2 = null;
+    for (var pp = 0; pp < 2; pp++) {
+        updateLogoPPDiv[pp] = null;
+        updateLogoPPLogo[pp] = null;
+        streamTitlePP[pp] = null;
+        streamGamePP[pp] = null;
+        streamViewersPP[pp] = null;
+    }
 
     for (var i = 0; i < 4; i++) {
         streamTitleMulti[i] = null;
@@ -741,11 +737,11 @@ function Play_updateStreamInfoGet(theUrl, Is_play) {
 function Play_updateStreamInfoValues(response, Is_play, ID) {
     var obj = JSON.parse(response);
 
-    if (Play_isOn && obj.data && obj.data.length && Play_updateStreamInfoGetId === ID) {
+    if ((Play_isOn || PlayVod_isOn) && obj.data && obj.data.length && Play_updateStreamInfoGetId === ID) {
         if (Is_play) {
             Play_updateStreamInfoEnd(obj.data[0]);
 
-            if (PlayExtra_PicturePicture) {
+            if (PlayExtra_PicturePicture && !PlayExtraVod_InPP) {
                 PlayExtra_updateStreamInfo();
             }
         } else {
@@ -769,7 +765,7 @@ function Play_updateStreamInfoGetError(Is_play) {
     //we fail but we still watching so update the time
     if (Is_play && Play_data.data.length > 0) {
         Main_Set_history('live', Play_data.data, !Play_isPlaying());
-    } else if (!Is_play && PlayExtra_data.data.length > 0) {
+    } else if (!Is_play && !PlayExtraVod_InPP && PlayExtra_data.data.length > 0) {
         Main_Set_history('live', PlayExtra_data.data, !Play_isPlaying());
     }
 }
@@ -2066,7 +2062,9 @@ function Play_CloseBigAndSwich(error_410) {
 }
 
 function Play_CloseSmall() {
-    PlayExtra_updateStreamInfo();
+    if (PlayExtraVod_InPP) PlayExtraVod_ClearPP();
+    else PlayExtra_updateStreamInfo();
+
     PlayExtra_PicturePicture = false;
 
     if (Main_IsOn_OSInterface) {
@@ -2076,7 +2074,7 @@ function Play_CloseSmall() {
 
     PlayExtra_UnSetPanel();
     Play_CleanHideExit();
-    Play_getQualities(1, false);
+    Play_getQualities(PlayVod_isOn ? 2 : 1, false);
 }
 
 function Play_EndDialogUpDown(adder) {
@@ -2113,8 +2111,14 @@ function Play_OpenFeed(keyfun) {
     }
 
     if (UserLiveFeed_FeedPosX >= UserLiveFeedobj_UserVodPos) {
-        if (Play_MultiEnable || PlayExtra_PicturePicture) {
+        if (Play_MultiEnable) {
             Play_showWarningMiddleDialog(STR_PP_VOD_ERROR, 2500);
+            return;
+        }
+
+        //While the small window is up the feed fills it, the main player keeps what it has
+        if (PlayExtra_PicturePicture) {
+            PlayExtraVod_KeyEnter();
             return;
         }
 
@@ -2201,7 +2205,9 @@ function Play_RestorePlayDataValues() {
 
 function Play_handleKeyUpClear() {
     Main_clearTimeout(PlayExtra_KeyEnterID);
-    Main_PlayHandleKeyDown();
+
+    if (PlayVod_isOn) Main_PlayVodHandleKeyDown();
+    else Main_PlayHandleKeyDown();
 }
 
 function Play_Exit() {
