@@ -290,6 +290,9 @@ function PlayVod_ResumeAfterOnline(forced) {
     if (forced || navigator.onLine || Play_ResumeAfterOnlineCounter > 200) {
         Main_clearInterval(Play_ResumeAfterOnlineId);
         Play_SetControlsVisibility('ShowInStay');
+
+        if (PlayExtra_PicturePicture) PlayExtra_Resume(true);
+
         PlayVod_loadData();
     }
     Play_ResumeAfterOnlineCounter++;
@@ -477,6 +480,11 @@ function PlayVod_onPlayer() {
     }
 
     PlayVod_replay = false;
+
+    //The panel renders the vod half from the store, a vod opened straight into the big window
+    //never went through PlayExtra_KeyEnter and would leave it holding the previous pair
+    if (PlayExtra_PicturePicture) PlayExtraVod_Store = PlayExtraVod_StoreFromMain();
+
     if (Play_ChatEnable && !Play_isChatShown()) Play_showChat();
     Play_SetFullScreen(Play_isFullScreen);
     Play_SetControlsVisibilityPlayer(2);
@@ -512,6 +520,8 @@ function PlayVod_shutdownStream(SkipSaveOffset) {
 }
 
 function PlayVod_PreshutdownStream(saveOffset) {
+    if (PlayExtra_PicturePicture) Play_CloseSmall();
+
     PlayVod_UpdateHistory(Main_values.Main_Go, saveOffset);
 
     if (Main_IsOn_OSInterface && !Play_PreviewId) {
@@ -625,7 +635,8 @@ function PlayVod_showPanel(autoHide) {
 function PlayVod_RefreshProgressBarrStart(showVideoQuality, who_called) {
     PlayVod_getVideoQualityRate = 0;
 
-    if (Play_isOn) Play_RefreshWatchingTime();
+    //Play_isOn is false while a vod is the main player, but the pair still has a live half to tick
+    if (Play_isOn || PlayExtra_PicturePicture) Play_RefreshWatchingTime();
 
     PlayVod_ProgressBarrUpdateNoAnimation(
         OSInterface_gettime() / 1000,
@@ -670,7 +681,7 @@ function PlayVod_RefreshProgressBarr(showVideoQuality, who_called) {
         else Play_VideoStatusTest();
     }
 
-    if (Play_isOn) Play_RefreshWatchingTime();
+    if (Play_isOn || PlayExtra_PicturePicture) Play_RefreshWatchingTime();
 }
 
 function PlayVod_ProgressBarrUpdateNoAnimation(current_time_seconds, duration_seconds, update_bar, callVideoQuality, showVideoQuality, who_called) {
@@ -1006,7 +1017,9 @@ function PlayVod_CheckIfIsLiveStart() {
 }
 
 function PlayVod_OpenLiveStream() {
-    PlayVod_PreshutdownStream(true);
+    if (PlayExtra_PicturePicture) PlayExtraVod_ReplaceVodMain();
+    else PlayVod_PreshutdownStream(true);
+
     Play_OpenFeed(PlayVod_handleKeyDown);
 }
 
@@ -1172,7 +1185,13 @@ function PlayVod_handleKeyDown(e) {
             } else if (Play_isEndDialogVisible()) {
                 Play_EndDialogUpDown(1);
             } else if (UserLiveFeed_isPreviewShowing()) UserLiveFeed_KeyUpDown(1);
-            else if (Play_isFullScreen && !Play_isPanelShowing()) Play_controls[Play_controlsChat].enterKey(2);
+            else if (PlayExtra_PicturePicture) {
+                Main_clearAllPlayerEvents();
+                Main_addEventListener('keyup', Play_handleKeyUp);
+                Play_EndUpclear = false;
+                Play_EndUpclearCalback = PlayVod_handleKeyDown;
+                Play_EndUpclearID = Main_setTimeout(Play_PP_Multi_KeyDownHold, Screens_KeyUptimeout, Play_EndUpclearID);
+            } else if (Play_isFullScreen && !Play_isPanelShowing()) Play_controls[Play_controlsChat].enterKey(2);
             else if (!Play_isVodDialogVisible()) PlayVod_showPanel(true);
             break;
         case KEY_ENTER:
@@ -1200,7 +1219,14 @@ function PlayVod_handleKeyDown(e) {
                 if (UserLiveFeed_DataObj[UserLiveFeed_FeedPosX][UserLiveFeed_FeedPosY[UserLiveFeed_FeedPosX]].image) {
                     UserLiveFeed_OpenBanner();
                 } else if (UserLiveFeed_obj[UserLiveFeed_FeedPosX].IsGame) UserLiveFeed_KeyEnter(UserLiveFeed_FeedPosX);
-                else PlayVod_CheckIfIsLiveStart();
+                else {
+                    Main_clearAllPlayerEvents();
+                    Main_addEventListener('keyup', Play_handleKeyUp);
+                    PlayExtra_clear = false;
+                    UserLiveFeed_ResetFeedId();
+                    Play_EndUpclearCalback = PlayVod_handleKeyDown;
+                    PlayExtra_KeyEnterID = Main_setTimeout(PlayExtra_PPKeyEnter, Screens_KeyUptimeout, PlayExtra_KeyEnterID);
+                }
             } else PlayVod_showPanel(true);
             break;
         case KEY_STOP:
@@ -1246,7 +1272,7 @@ function PlayVod_handleKeyDown(e) {
         case KEY_1:
             if (UserLiveFeed_isPreviewShowing() && (!Play_EndFocus || !Play_isEndDialogVisible())) {
                 if (UserLiveFeed_obj[UserLiveFeed_FeedPosX].IsGame) UserLiveFeed_KeyEnter(UserLiveFeed_FeedPosX);
-                else PlayVod_CheckIfIsLiveStart();
+                else PlayExtra_PPKeyEnter();
             } else PlayVod_NumberKey_QuickJump(e.keyCode);
             break;
         case KEY_2:
