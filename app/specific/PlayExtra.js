@@ -334,9 +334,7 @@ function PlayExtra_UpdatePanelLive(pp) {
 
     if (!obj.data || !obj.data.length) return;
 
-    if (obj.data[9]) {
-        Main_getElementById('stream_info_ppimg' + pp).src = obj.data[9];
-    }
+    Main_getElementById('stream_info_ppimg' + pp).src = obj.data[9] ? obj.data[9] : IMG_404_BANNER;
 
     PlayExtra_updateStreamLogo(obj.data[14], pp);
 
@@ -412,11 +410,13 @@ function PlayExtra_updateLogo(pp) {
 
     updateLogoPPDiv[pp] = div;
 
-    if (updateLogoPPLogo[pp] !== obj.data[9]) {
-        Main_getElementById('stream_info_ppimg' + pp).src = obj.data[9];
+    var logo = obj.data[9] ? obj.data[9] : IMG_404_BANNER;
+
+    if (updateLogoPPLogo[pp] !== logo) {
+        Main_getElementById('stream_info_ppimg' + pp).src = logo;
     }
 
-    updateLogoPPLogo[pp] = obj.data[9];
+    updateLogoPPLogo[pp] = logo;
 }
 
 function PlayExtra_loadDataFail(Reason) {
