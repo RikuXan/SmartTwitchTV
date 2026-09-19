@@ -354,6 +354,10 @@ Consequences worth knowing before changing any of it:
   `Play_Start` hand slot 0 a new source, which is how the live only case already behaved.
 - A stream that moves between the windows keeps its `watching_time`. Only a genuinely new stream
   restarts that counter.
+- `Play_CheckLiveThumb` decides what a window holds from `PlayExtraVod_InPP` plus the cell sitting in
+  `PlayExtra_data`, and a VOD cell carries its channel at index 14 exactly like a live one. Anything
+  that drops the VOD state has to run **after** that check, or the small window's VOD reads as a live
+  stream of its channel and that channel's own live stream is refused as already playing.
 
 ## Presence
 
