@@ -304,6 +304,26 @@ Consequences worth knowing before changing any of it:
 - `gettimePP` / `getsavedtimePP` expose slot 1's position so the small VOD keeps its place across a
   switch and a trip through the background. The bridge refreshes the live value every 500 ms, so a
   read right after a switch still reports the player that used to be there.
+- **Both halves of the panel write the same elements.** A renderer that only writes a field when it
+  has a value leaves the other half's content standing after a switch, which is how the live
+  channel's logo ended up under the VOD. Every field is written unconditionally, with a placeholder
+  when there is nothing to show.
+- The logo fetch id lives **in** `PlayExtraVod_Store`. As a module level latch it outlived the store
+  it belonged to, so replacing the VOD skipped the fetch forever and the panel kept the old image.
+- The store takes its title, game, date and views from the **cell**, not from `ChannelVod_*`. Only
+  `Main_OpenVodStart` fills those globals, so a VOD that reached the main player through a switch or
+  a resume has them empty. The store keeps the game raw; `ChannelVod_game` is pre-formatted with
+  `STR_STARTED + STR_PLAYING`.
+- `Play_RefreshWatchingTime` drives both time lines and both of its `PlayVod.js` call sites were
+  gated on `Play_isOn`, which is false whenever a VOD is the main player. They also need
+  `PlayExtra_PicturePicture`, or the lines freeze holding the previous arrangement's text. The
+  interval behind them only runs while the info panel is open, so `PlayExtra_UpdatePanel` repaints
+  them too.
+- Replacing the big window's source must not go through `PlayVod_PreshutdownStream`; it calls
+  `stopVideo`, which resets every player. `PlayExtraVod_ReplaceVodMain` drops the VOD state and lets
+  `Play_Start` hand slot 0 a new source, which is how the live only case already behaved.
+- A stream that moves between the windows keeps its `watching_time`. Only a genuinely new stream
+  restarts that counter.
 
 ## Branches
 
