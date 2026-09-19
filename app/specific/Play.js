@@ -741,8 +741,10 @@ function Play_updateStreamInfoValues(response, Is_play, ID) {
         if (Is_play) {
             Play_updateStreamInfoEnd(obj.data[0]);
 
-            if (PlayExtra_PicturePicture && !PlayExtraVod_InPP) {
-                PlayExtra_updateStreamInfo();
+            if (PlayExtra_PicturePicture) {
+                //A vod in the small window has no live info to look up, but the panel still repaints
+                if (PlayExtraVod_InPP) PlayExtra_UpdatePanel();
+                else PlayExtra_updateStreamInfo();
             }
         } else {
             var tempData = ScreensObj_LiveCellArray(obj.data[0]);

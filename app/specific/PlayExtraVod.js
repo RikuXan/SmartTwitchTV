@@ -504,6 +504,9 @@ function PlayExtraVod_EnterLiveMain() {
 
     Main_values.Play_WasPlaying = 1;
 
+    //The seek step table is a global, vod mode swapped in its accelerating one
+    PlayClip_SetProgressBarJumpers();
+
     Play_controls[Play_controlsChanelCont].setLabel(Play_data.data[1]);
     Play_controls[Play_controlsGameCont].setLabel(Play_data.data[3]);
 
