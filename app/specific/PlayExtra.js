@@ -36,17 +36,20 @@ function PlayExtra_KeyEnter() {
 
     if (!Play_preventVodOnPP()) return;
 
-    if (PlayExtraVod_InPP) PlayExtraVod_ClearPP();
-
-    //The main player already holds the vod, the panel still has to render it beside the new live stream
-    if (PlayVod_isOn) PlayExtraVod_Store = PlayExtraVod_StoreFromMain();
-
     var doc = Play_CheckLiveThumb(false, false);
 
     if (doc) {
+        //The check above reads the small window as a live stream, so the vod has to leave it after
+        var wasVodInPP = PlayExtraVod_InPP;
+
+        if (wasVodInPP) PlayExtraVod_ClearPP();
+
+        //The main player already holds the vod, the panel still has to render it beside the new live stream
+        if (PlayVod_isOn) PlayExtraVod_Store = PlayExtraVod_StoreFromMain();
+
         PlayExtra_WasPicturePicture = PlayExtra_PicturePicture;
 
-        if (PlayExtra_WasPicturePicture) {
+        if (PlayExtra_WasPicturePicture && !wasVodInPP) {
             //PlayExtra_PicturePicture was alredy enable so save data and update live historyinfo
             PlayExtra_SavePlayData();
         } else PlayExtra_Save_data = JSON.parse(JSON.stringify(Play_data_base));
@@ -314,6 +317,26 @@ var streamGamePP = [];
 var streamViewersPP = [];
 var updateLogoPPDiv = [];
 var updateLogoPPLogo = [];
+var updateLogoPPOwner = [];
+
+//Both halves write this element, so only a change of owner may blank one, a logo that has not
+//arrived yet must leave the picture that is up alone
+function PlayExtra_SetPanelLogo(pp, owner, logo) {
+    var changed = !Main_A_equals_B(updateLogoPPOwner[pp], owner);
+
+    updateLogoPPOwner[pp] = owner;
+
+    if (!logo) {
+        if (!changed) return;
+
+        logo = IMG_404_BANNER;
+    }
+
+    if (updateLogoPPLogo[pp] === logo) return;
+
+    Main_getElementById('stream_info_ppimg' + pp).src = logo;
+    updateLogoPPLogo[pp] = logo;
+}
 
 function PlayExtra_UpdatePanel() {
     var vodSide = PlayExtraVod_Side();
@@ -349,7 +372,7 @@ function PlayExtra_UpdatePanelLive(pp) {
 
     if (!obj.data || !obj.data.length) return;
 
-    Main_getElementById('stream_info_ppimg' + pp).src = obj.data[9] ? obj.data[9] : IMG_404_BANNER;
+    PlayExtra_SetPanelLogo(pp, obj.data[14], obj.data[9]);
 
     PlayExtra_updateStreamLogo(obj.data[14], pp);
 
@@ -373,6 +396,7 @@ function PlayExtra_UpdatePanelLive(pp) {
 }
 
 var PlayExtra_updateStreamLogoValuesId = [];
+var PlayExtra_updateStreamLogoPending = [];
 function PlayExtra_updateStreamLogo(channelId, pp) {
     var obj = !pp ? Play_data : PlayExtra_data;
 
@@ -380,10 +404,18 @@ function PlayExtra_updateStreamLogo(channelId, pp) {
         PlayExtra_updateLogo(pp);
     }
 
+    //A refresh every second would keep invalidating the request the refresh before it sent
+    if (Main_A_equals_B(PlayExtra_updateStreamLogoPending[pp], channelId)) return;
+
+    PlayExtra_updateStreamLogoPending[pp] = channelId;
     PlayExtra_updateStreamLogoValuesId[pp] = new Date().getTime();
     var theUrl = Main_helix_api + 'users?id=' + channelId;
 
-    BaseXmlHttpGet(theUrl, PlayExtra_updateStreamLogoValues, noop_fun, pp, PlayExtra_updateStreamLogoValuesId[pp], true);
+    BaseXmlHttpGet(theUrl, PlayExtra_updateStreamLogoValues, PlayExtra_updateStreamLogoError, pp, PlayExtra_updateStreamLogoValuesId[pp], true);
+}
+
+function PlayExtra_updateStreamLogoError(pp, ID) {
+    if (PlayExtra_updateStreamLogoValuesId[pp] === ID) PlayExtra_updateStreamLogoPending[pp] = null;
 }
 
 function PlayExtra_updateStreamLogoValues(responseText, pp, ID) {
@@ -396,6 +428,14 @@ function PlayExtra_updateStreamLogoValues(responseText, pp, ID) {
     var response = JSON.parse(responseText);
 
     if (response.data && response.data.length && PlayExtra_updateStreamLogoValuesId[pp] === ID) {
+        //A vod keeps the channel of the live stream it replaced, so the id below cannot tell that
+        //this half stopped being the live one while the request was out
+        if (pp === PlayExtraVod_Side()) {
+            PlayExtra_updateStreamLogoPending[pp] = null;
+
+            return;
+        }
+
         //TODO update this with a API that provides logo and is partner
         var objData = response.data[0];
 
@@ -425,13 +465,7 @@ function PlayExtra_updateLogo(pp) {
 
     updateLogoPPDiv[pp] = div;
 
-    var logo = obj.data[9] ? obj.data[9] : IMG_404_BANNER;
-
-    if (updateLogoPPLogo[pp] !== logo) {
-        Main_getElementById('stream_info_ppimg' + pp).src = logo;
-    }
-
-    updateLogoPPLogo[pp] = logo;
+    PlayExtra_SetPanelLogo(pp, obj.data[14], obj.data[9]);
 }
 
 function PlayExtra_loadDataFail(Reason) {

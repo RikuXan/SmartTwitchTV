@@ -1247,11 +1247,11 @@ function Play_CheckLiveThumb(PreventResetFeed, PreventWarn) {
         var isVodScreen = UserLiveFeed_FeedPosX >= UserLiveFeedobj_UserVodPos;
 
         if ((!Play_isOn && !isVodScreen) || (!PlayVod_isOn && isVodScreen)) {
-            if (!Play_PPIsAlredyOpen(obj, isVodScreen)) return obj;
+            if (!Play_ContentIsAlredyOpen(obj, isVodScreen)) return obj;
 
             error = STR_ALREDY_PLAYING;
         } else if (isVodScreen) {
-            if (!PlayVod_isOn || Main_values.ChannelVod_vodId !== obj[7]) return obj;
+            if (!Play_VodIsOpen(obj[7])) return obj;
 
             error = STR_ALREDY_PLAYING;
         } else if (UserLiveFeed_obj[UserLiveFeed_FeedPosX].checkHistory) {
@@ -1267,11 +1267,11 @@ function Play_CheckLiveThumb(PreventResetFeed, PreventWarn) {
                 else return obj;
             } else if (Play_MultiEnable) {
                 if (!Play_MultiIsAlredyOPen(obj[14])) return obj;
-            } else if (Play_data.data[14] !== obj[14] && PlayExtra_data.data[14] !== obj[14]) return obj;
+            } else if (!Play_LiveIsOpen(obj[14])) return obj;
         } else {
             if (Play_MultiEnable) {
                 if (!Play_MultiIsAlredyOPen(obj[14])) return obj;
-            } else if (Play_data.data[14] !== obj[14] && PlayExtra_data.data[14] !== obj[14]) return obj;
+            } else if (!Play_LiveIsOpen(obj[14])) return obj;
 
             error = STR_ALREDY_PLAYING;
         }
@@ -1288,12 +1288,21 @@ function Play_CheckLiveThumb(PreventResetFeed, PreventWarn) {
     return null;
 }
 
-function Play_PPIsAlredyOpen(obj, isVodScreen) {
-    if (!PlayExtra_PicturePicture) return false;
+function Play_ContentIsAlredyOpen(obj, isVodScreen) {
+    return isVodScreen ? Play_VodIsOpen(obj[7]) : Play_LiveIsOpen(obj[14]);
+}
 
-    if (isVodScreen) return PlayExtraVod_InPP && Main_A_equals_B(PlayExtraVod_Store.vodId, obj[7]);
+//A vod cell's index 14 is its channel too, so only a window actually holding a live stream collides
+function Play_LiveIsOpen(channelId) {
+    if (Play_isOn && Main_A_equals_B(Play_data.data[14], channelId)) return true;
 
-    return !PlayExtraVod_InPP && Main_A_equals_B(PlayExtra_data.data[14], obj[14]);
+    return PlayExtra_PicturePicture && !PlayExtraVod_InPP && Main_A_equals_B(PlayExtra_data.data[14], channelId);
+}
+
+function Play_VodIsOpen(vodId) {
+    if (PlayVod_isOn && Main_A_equals_B(Main_values.ChannelVod_vodId, vodId)) return true;
+
+    return PlayExtra_PicturePicture && PlayExtraVod_InPP && Main_A_equals_B(PlayExtraVod_Store.vodId, vodId);
 }
 
 function Play_PlayPauseChange(State, PlayVodClip) {

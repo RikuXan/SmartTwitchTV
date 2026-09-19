@@ -13,7 +13,7 @@ Fork-local notes for building this app and deploying it to the Nvidia Shield TV 
 | `apk/app/src/main/cpp/` | Signalsmith Stretch JNI bridge (needs the NDK). |
 | `../media` (`~/Code/github/RikuXan/media`) | The patched Media3/ExoPlayer fork this build links against, a sibling checkout. |
 | `.tmp/docker/` | Dockerfiles for the two build images. |
-| `.tmp/logs/twitchll-live.log` | Continuous `TwitchLL` capture written by the `stv-logcat` container. |
+| `.tmp/logs/twitchll-live.log` | Continuous `TwitchLL` capture. The running `stv-logcat` container mounts this path **from the `fgl27` clone**, not from here — `docker inspect stv-logcat` names the source it actually writes to. |
 
 Application ids: release is `com.fgl27.twitch`, the same id as the official app, debug is
 `com.fgl27.twitch.debug` (`applicationId` + `applicationIdSuffix` in `apk/app/build.gradle`).
@@ -204,6 +204,9 @@ while true; do
 done'
 ```
 
+The device ring buffer holds only a few seconds of `TwitchLL`, which is far too little to read
+back a reproduction. Always read the captured file, never `adb logcat -d`.
+
 ### The capture can die silently
 
 `adb logcat` does not exit when the relay reconnects on a new port — it keeps running with no
@@ -354,6 +357,10 @@ Consequences worth knowing before changing any of it:
   `Play_Start` hand slot 0 a new source, which is how the live only case already behaved.
 - A stream that moves between the windows keeps its `watching_time`. Only a genuinely new stream
   restarts that counter.
+- `Play_CheckLiveThumb` decides what a window holds from `PlayExtraVod_InPP` plus the cell sitting in
+  `PlayExtra_data`, and a VOD cell carries its channel at index 14 exactly like a live one. Anything
+  that drops the VOD state has to run **after** that check, or the small window's VOD reads as a live
+  stream of its channel and that channel's own live stream is refused as already playing.
 
 ## Presence
 

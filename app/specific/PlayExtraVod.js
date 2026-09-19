@@ -267,7 +267,7 @@ function PlayExtraVod_UpdatePanelSide(pp) {
 
     if (!store.data.length) return;
 
-    PlayExtraVod_UpdateLogo(pp);
+    PlayExtraVod_UpdateLogo();
 
     if (streamTitlePP[pp] !== store.title) {
         Main_innerHTML('stream_info_pp_title' + pp, store.title);
@@ -293,23 +293,20 @@ function PlayExtraVod_RefreshTimes(pp, dateNow) {
     Main_textContentWithEle(Play_infoPPWatchingTime[pp], store.watchingTime ? STR_WATCHING + Play_timeMs(dateNow - store.watchingTime) : '');
 }
 
-function PlayExtraVod_UpdateLogo(pp) {
+function PlayExtraVod_UpdateLogo() {
     var store = PlayExtraVod_Store;
+    var pp = PlayExtraVod_Side();
 
-    var div = Play_partnerIcon(store.channelName, store.channelPartner, 0, store.language ? '[' + store.language.toUpperCase() + ']' : '');
+    if (pp < 0) return;
+
+    var div = Play_partnerIcon(store.channelName, store.channelPartner, 1, store.language ? '[' + store.language.toUpperCase() + ']' : '');
 
     if (updateLogoPPDiv[pp] !== div) {
         Main_innerHTML('stream_info_pp_name' + pp, div);
     }
     updateLogoPPDiv[pp] = div;
 
-    //Always write the image, the other side of the panel wrote this element while the vod sat elsewhere
-    var logo = store.channelLogo ? store.channelLogo : IMG_404_BANNER;
-
-    if (updateLogoPPLogo[pp] !== logo) {
-        Main_getElementById('stream_info_ppimg' + pp).src = logo;
-    }
-    updateLogoPPLogo[pp] = logo;
+    PlayExtra_SetPanelLogo(pp, store.vodId, store.channelLogo);
 
     if (store.channelLogo || store.logoId) return;
 
@@ -319,13 +316,13 @@ function PlayExtraVod_UpdateLogo(pp) {
         Main_helix_api + 'users?id=' + store.channelId,
         PlayExtraVod_UpdateLogoResult,
         PlayExtraVod_UpdateLogoError,
-        pp,
+        0,
         store.logoId,
         true
     );
 }
 
-function PlayExtraVod_UpdateLogoResult(responseText, pp, ID) {
+function PlayExtraVod_UpdateLogoResult(responseText, key, ID) {
     if (PlayExtraVod_Store.logoId !== ID) return;
 
     var response = JSON.parse(responseText);
@@ -335,10 +332,10 @@ function PlayExtraVod_UpdateLogoResult(responseText, pp, ID) {
     PlayExtraVod_Store.channelPartner = response.data[0].broadcaster_type === 'partner';
     PlayExtraVod_Store.channelLogo = response.data[0].profile_image_url;
 
-    PlayExtraVod_UpdateLogo(pp);
+    PlayExtraVod_UpdateLogo();
 }
 
-function PlayExtraVod_UpdateLogoError(pp, ID) {
+function PlayExtraVod_UpdateLogoError(key, ID) {
     if (PlayExtraVod_Store.logoId === ID) PlayExtraVod_Store.logoId = 0;
 }
 
@@ -503,6 +500,9 @@ function PlayExtraVod_EnterLiveMain() {
     Main_textContentWithEle(Play_BottonIcons_Progress_Duration, Play_timeS(Play_DurationSeconds));
 
     Main_values.Play_WasPlaying = 1;
+
+    //The seek step table is a global, vod mode swapped in its accelerating one
+    PlayClip_SetProgressBarJumpers();
 
     Play_controls[Play_controlsChanelCont].setLabel(Play_data.data[1]);
     Play_controls[Play_controlsGameCont].setLabel(Play_data.data[3]);
