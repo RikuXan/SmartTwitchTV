@@ -199,6 +199,17 @@ while true; do
 done'
 ```
 
+### The capture can die silently
+
+`adb logcat` does not exit when the relay reconnects on a new port — it keeps running with no
+device, so the `while` loop never restarts it and `twitchll-live.log` simply stops growing. A
+capture that is hours stale with a live app is this, not an app fault. Kill the `adb logcat` pid
+inside `stv-logcat` and the loop respawns it against the current connection.
+
+Output to the file is block buffered, so an idle app produces no visible growth for a while even
+when the capture is healthy. Confirm with `docker exec stv-logcat bash -c 'timeout 6 adb logcat
+-T 1 -s TwitchLL:V | head'` rather than by watching the file.
+
 ### Host relay when the container cannot reach the Shield
 
 After the September 9 reconnect, the host could reach `10.0.47.45:5555` but the container
