@@ -289,6 +289,19 @@ to the other (`PlayExtraVod_EnterVodMain` / `PlayExtraVod_EnterLiveMain`) withou
 playback — Java's `SwitchPlayer` already swaps `PlayerObj[0]` and `PlayerObj[1]` including their
 `Type`, so seeking, duration and pause keep targeting slot 0 and need no slot parameter.
 
+Choosing a feed cell while the pair is up targets a window by how long ENTER is held, the same for
+either kind of content. `1` is the hold gesture on one key.
+
+| big / small | short press a VOD | hold ENTER on a VOD |
+| --- | --- | --- |
+| live / live | VOD takes the big window | VOD takes the small window |
+| live / VOD | refused, the big window would be a second VOD | replaces the VOD in the small window |
+| VOD / live | replaces the VOD in the big window | refused, the small window would be a second VOD |
+
+The two refusals are the same rule read from either end: a gesture is blocked only when **its own**
+target slot would become the second VOD. `Play_OpenFeed` checks `PlayExtraVod_InPP`,
+`PlayExtraVod_KeyEnter` checks `PlayVod_isOn`.
+
 Consequences worth knowing before changing any of it:
 
 - Live and VOD feed cells use **different array indices** (`[2]` title vs created-at, `[9]` logo vs
