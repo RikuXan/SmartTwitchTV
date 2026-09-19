@@ -619,6 +619,12 @@ function PlayVod_qualityReset() {
 function PlayVod_showPanel(autoHide) {
     if (Play_getQualitiesFail) Play_getQualities(2, true);
 
+    //Only Play_showPanel refreshes the pair's panel, and a vod main never reaches it
+    if (PlayExtra_PicturePicture) {
+        PlayExtra_UpdatePanel();
+        PlayExtra_updateStreamInfo();
+    }
+
     PlayVod_SetChapters();
     PlayVod_RefreshProgressBarrStart(autoHide, 1);
     Play_CleanHideExit();
