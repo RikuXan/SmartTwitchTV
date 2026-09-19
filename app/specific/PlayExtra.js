@@ -36,17 +36,20 @@ function PlayExtra_KeyEnter() {
 
     if (!Play_preventVodOnPP()) return;
 
-    if (PlayExtraVod_InPP) PlayExtraVod_ClearPP();
-
-    //The main player already holds the vod, the panel still has to render it beside the new live stream
-    if (PlayVod_isOn) PlayExtraVod_Store = PlayExtraVod_StoreFromMain();
-
     var doc = Play_CheckLiveThumb(false, false);
 
     if (doc) {
+        //The check above reads the small window as a live stream, so the vod has to leave it after
+        var wasVodInPP = PlayExtraVod_InPP;
+
+        if (wasVodInPP) PlayExtraVod_ClearPP();
+
+        //The main player already holds the vod, the panel still has to render it beside the new live stream
+        if (PlayVod_isOn) PlayExtraVod_Store = PlayExtraVod_StoreFromMain();
+
         PlayExtra_WasPicturePicture = PlayExtra_PicturePicture;
 
-        if (PlayExtra_WasPicturePicture) {
+        if (PlayExtra_WasPicturePicture && !wasVodInPP) {
             //PlayExtra_PicturePicture was alredy enable so save data and update live historyinfo
             PlayExtra_SavePlayData();
         } else PlayExtra_Save_data = JSON.parse(JSON.stringify(Play_data_base));
