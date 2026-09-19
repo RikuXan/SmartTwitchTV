@@ -1,7 +1,7 @@
 package com.fgl27.twitch.audio;
 
 import android.content.Context;
-import android.util.Log;
+import com.fgl27.twitch.TwitchDiagnosticLog;
 
 import androidx.annotation.Nullable;
 import androidx.media3.exoplayer.DefaultRenderersFactory;
@@ -18,7 +18,7 @@ public final class SignalsmithRenderersFactory extends DefaultRenderersFactory {
     @Override
     protected AudioSink buildAudioSink(Context context, boolean enableFloatOutput, boolean enableAudioTrackPlaybackParams) {
         if (!SignalsmithStretch.isAvailable()) {
-            Log.i("TwitchLL", "audio-stretcher=sonic-fallback reason=native-library-unavailable");
+            TwitchDiagnosticLog.i("audio-stretcher=sonic-fallback reason=native-library-unavailable");
             return super.buildAudioSink(context, enableFloatOutput, enableAudioTrackPlaybackParams);
         }
         return new DefaultAudioSink.Builder(context)

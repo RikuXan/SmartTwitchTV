@@ -1,6 +1,6 @@
 package com.fgl27.twitch.audio;
 
-import android.util.Log;
+import com.fgl27.twitch.TwitchDiagnosticLog;
 
 import androidx.media3.common.C;
 import androidx.media3.common.Format;
@@ -174,7 +174,7 @@ public final class SignalsmithAudioProcessor implements AudioProcessor {
         }
         configurationLogged = true;
         int latencyFrames = stretch.inputLatencyFrames() + stretch.outputLatencyFrames();
-        Log.i("TwitchLL", "audio-stretcher=signalsmith block=" + BLOCK_MS + "ms interval=" + INTERVAL_MS
+        TwitchDiagnosticLog.i("audio-stretcher=signalsmith block=" + BLOCK_MS + "ms interval=" + INTERVAL_MS
                 + "ms latency=" + (latencyFrames * 1000L / audioFormat.sampleRate) + "ms rate="
                 + audioFormat.sampleRate + " channels=" + audioFormat.channelCount);
     }
