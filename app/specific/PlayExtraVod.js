@@ -31,6 +31,7 @@ function PlayExtraVod_NewStore() {
         channelLogin: '',
         channelName: '',
         channelLogo: '',
+        logoId: 0,
         channelPartner: null,
         title: '',
         game: '',
@@ -228,7 +229,6 @@ function PlayExtraVod_ClearPP() {
     PlayExtraVod_InPP = false;
     PlayExtraVod_Store = PlayExtraVod_NewStore();
     PlayExtraVod_LoadId = 0;
-    PlayExtraVod_LogoId = 0;
 }
 
 function PlayExtraVod_EndedIsVod(doSwitch) {
@@ -274,8 +274,6 @@ function PlayExtraVod_UpdatePanelSide(pp) {
     streamViewersPP[pp] = store.views;
 }
 
-var PlayExtraVod_LogoId = 0;
-
 function PlayExtraVod_UpdateLogo(pp) {
     var store = PlayExtraVod_Store;
 
@@ -286,24 +284,30 @@ function PlayExtraVod_UpdateLogo(pp) {
     }
     updateLogoPPDiv[pp] = div;
 
-    if (store.channelLogo) {
-        if (updateLogoPPLogo[pp] !== store.channelLogo) {
-            Main_getElementById('stream_info_ppimg' + pp).src = store.channelLogo;
-        }
-        updateLogoPPLogo[pp] = store.channelLogo;
+    //Always write the image, the other side of the panel wrote this element while the vod sat elsewhere
+    var logo = store.channelLogo ? store.channelLogo : IMG_404_BANNER;
 
-        return;
+    if (updateLogoPPLogo[pp] !== logo) {
+        Main_getElementById('stream_info_ppimg' + pp).src = logo;
     }
+    updateLogoPPLogo[pp] = logo;
 
-    if (PlayExtraVod_LogoId) return;
+    if (store.channelLogo || store.logoId) return;
 
-    PlayExtraVod_LogoId = new Date().getTime();
+    store.logoId = new Date().getTime();
 
-    BaseXmlHttpGet(Main_helix_api + 'users?id=' + store.channelId, PlayExtraVod_UpdateLogoResult, noop_fun, pp, PlayExtraVod_LogoId, true);
+    BaseXmlHttpGet(
+        Main_helix_api + 'users?id=' + store.channelId,
+        PlayExtraVod_UpdateLogoResult,
+        PlayExtraVod_UpdateLogoError,
+        pp,
+        store.logoId,
+        true
+    );
 }
 
 function PlayExtraVod_UpdateLogoResult(responseText, pp, ID) {
-    if (PlayExtraVod_LogoId !== ID) return;
+    if (PlayExtraVod_Store.logoId !== ID) return;
 
     var response = JSON.parse(responseText);
 
@@ -313,6 +317,10 @@ function PlayExtraVod_UpdateLogoResult(responseText, pp, ID) {
     PlayExtraVod_Store.channelLogo = response.data[0].profile_image_url;
 
     PlayExtraVod_UpdateLogo(pp);
+}
+
+function PlayExtraVod_UpdateLogoError(pp, ID) {
+    if (PlayExtraVod_Store.logoId === ID) PlayExtraVod_Store.logoId = 0;
 }
 
 function PlayExtraVod_SaveOffset() {
