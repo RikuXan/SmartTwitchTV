@@ -2109,8 +2109,8 @@ function Play_OpenFeed(keyfun) {
             return;
         }
 
-        if (PlayExtra_PicturePicture) {
-            PlayExtraVod_KeyEnter();
+        if (PlayExtraVod_InPP) {
+            Play_showWarningMiddleDialog(STR_PP_VOD_ONLY_ONE, 2500);
             return;
         }
 

@@ -480,6 +480,11 @@ function PlayVod_onPlayer() {
     }
 
     PlayVod_replay = false;
+
+    //The panel renders the vod half from the store, a vod opened straight into the big window
+    //never went through PlayExtra_KeyEnter and would leave it holding the previous pair
+    if (PlayExtra_PicturePicture) PlayExtraVod_Store = PlayExtraVod_StoreFromMain();
+
     if (Play_ChatEnable && !Play_isChatShown()) Play_showChat();
     Play_SetFullScreen(Play_isFullScreen);
     Play_SetControlsVisibilityPlayer(2);
