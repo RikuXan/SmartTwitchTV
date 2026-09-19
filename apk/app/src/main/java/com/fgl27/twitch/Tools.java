@@ -287,7 +287,8 @@ public final class Tools {
                             ? urlConnection.getInputStream()
                             : urlConnection.getErrorStream()
                     ),
-                    checkResult
+                    checkResult,
+                    urlString
                 );
             } else {
                 return null;
@@ -484,14 +485,23 @@ public final class Tools {
         Context context,
         int Type,
         int LowLatency,
+        int LowLatencyTargetMs,
         boolean speedAdjustment,
         String mainPlaylist,
         String userAgent
     ) {
         if (Type == 1) {
+            //Twitch only serves low latency playlists (prefetch segments) when asked via fast_bread,
+            //the multivariant the web app fetched was requested without it so force a refetch
+            if (LowLatency == 1 && uri.toString().contains("fast_bread=false")) {
+                uri = Uri.parse(uri.toString().replace("fast_bread=false", "fast_bread=true"));
+                mainPlaylist = "";
+            }
+
             return new HlsMediaSource.Factory(getDefaultDataSourceFactory(mainPlaylist, uri, userAgent))
                 .setAllowChunklessPreparation(true)
                 .setLowLatency(LowLatency)
+                .setLowLatencyTargetMs(LowLatencyTargetMs)
                 .setspeedAdjustment(speedAdjustment)
                 .createMediaSource(MediaItemBuilder(uri));
         } else if (Type == 2) {
@@ -1149,10 +1159,14 @@ public final class Tools {
         final String url;
 
         ResponseObj(int status, String responseText, long checkResult) {
+            this(status, responseText, checkResult, null);
+        }
+
+        ResponseObj(int status, String responseText, long checkResult, String url) {
             this.status = status;
             this.responseText = responseText;
             this.checkResult = checkResult;
-            this.url = null;
+            this.url = url;
         }
     }
 
