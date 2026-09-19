@@ -28,17 +28,27 @@ public final class TwitchLivePlaybackSpeedControl implements LivePlaybackSpeedCo
     private static final long STALL_BUMP_US = 250_000;
     private static final long STALL_EXTRA_MAX_US = 1_500_000;
     private static final long STALL_DECAY_HOLD_MS = 120_000;
+    private static final int STALL_HOLD_MAX_STREAK = 8;
     private static final long STALL_DECAY_US_PER_SECOND = 25_000;
     private static final long MIN_UPDATE_INTERVAL_MS = 500;
+    private static final long ARM_PLATEAU_MS = 2000;
+    private static final long ARM_NEAR_PEAK_US = 200_000;
 
     private final long[] bucketMinUs = new long[WINDOW_BUCKETS];
     private long lastBucket = Long.MIN_VALUE;
+    private long windowFullAtMs = C.TIME_UNSET;
+    private boolean armed = false;
+    private long armDeadlineMs = C.TIME_UNSET;
+    private long armMaxSoFarUs = 0;
+    private long armLastNewMaxMs = C.TIME_UNSET;
 
     private long cushionUs = C.TIME_UNSET;
     private float minPlaybackSpeed = 1f;
     private float maxPlaybackSpeed = 1f;
     private long stallExtraUs = 0;
     private long lastStallMs = C.TIME_UNSET;
+    private int stallStreak = 0;
+    private long stallHoldMs = STALL_DECAY_HOLD_MS;
     private long lastDecayTickMs = C.TIME_UNSET;
     private long lastUpdateMs = C.TIME_UNSET;
     private float adjustedSpeed = 1f;
@@ -57,9 +67,24 @@ public final class TwitchLivePlaybackSpeedControl implements LivePlaybackSpeedCo
 
     @Override
     public void notifyRebuffer() {
+        //A stall while the cushion is still raised means the stream needs it for longer than the
+        //last hold, so each repeat holds it longer before decaying back toward the user's floor
+        stallStreak = stallExtraUs > 0 ? stallStreak + 1 : 1;
+        stallHoldMs = STALL_DECAY_HOLD_MS * Math.min(stallStreak, STALL_HOLD_MAX_STREAK);
+
         stallExtraUs = Math.min(stallExtraUs + STALL_BUMP_US, STALL_EXTRA_MAX_US);
         lastStallMs = SystemClock.elapsedRealtime();
         lastUpdateMs = C.TIME_UNSET;
+
+        //The stall is already remembered by the bump; leaving its empty buffer in the window would
+        //charge it twice and slow playback away from the edge while the refill ramp is still running
+        lastBucket = Long.MIN_VALUE;
+        windowFullAtMs = C.TIME_UNSET;
+        armed = false;
+        armDeadlineMs = C.TIME_UNSET;
+        armMaxSoFarUs = 0;
+        armLastNewMaxMs = C.TIME_UNSET;
+        adjustedSpeed = 1f;
     }
 
     @Override
@@ -67,6 +92,29 @@ public final class TwitchLivePlaybackSpeedControl implements LivePlaybackSpeedCo
         if (cushionUs == C.TIME_UNSET || minPlaybackSpeed == maxPlaybackSpeed) return 1f;
 
         long nowMs = SystemClock.elapsedRealtime();
+
+        //Samples from the startup fill ramp are not delivery jitter and must never enter the
+        //window; the ramp is only over once the buffer stops setting new maxima, and arming must
+        //happen near the peak so a mid-fill delivery hiccup cannot fake the plateau
+        if (!armed) {
+            if (armDeadlineMs == C.TIME_UNSET) armDeadlineMs = nowMs + WINDOW_BUCKETS * BUCKET_MS;
+            if (bufferedDurationUs > armMaxSoFarUs) {
+                armMaxSoFarUs = bufferedDurationUs;
+                armLastNewMaxMs = nowMs;
+            }
+            if (
+                (armLastNewMaxMs != C.TIME_UNSET &&
+                    nowMs - armLastNewMaxMs >= ARM_PLATEAU_MS &&
+                    bufferedDurationUs >= armMaxSoFarUs - ARM_NEAR_PEAK_US) ||
+                nowMs >= armDeadlineMs
+            ) {
+                armed = true;
+            } else {
+                adjustedSpeed = 1f;
+                return 1f;
+            }
+        }
+
         recordBuffer(nowMs, bufferedDurationUs);
         decayStallExtra(nowMs);
 
@@ -76,9 +124,12 @@ public final class TwitchLivePlaybackSpeedControl implements LivePlaybackSpeedCo
         lastUpdateMs = nowMs;
 
         long errorUs = windowedMinUs() - (cushionUs + stallExtraUs);
+        //While the window still holds the startup ramp its lows are fill artifacts, not delivery
+        //jitter: shaving stays allowed, slowing down must wait for one full window of real data
+        float minSpeed = isWarm(nowMs) ? minPlaybackSpeed : 1f;
         adjustedSpeed = Math.abs(errorUs) <= DEADBAND_US
             ? 1f
-            : Util.constrainValue(1f + PROPORTIONAL_FACTOR * errorUs, minPlaybackSpeed, maxPlaybackSpeed);
+            : Util.constrainValue(1f + PROPORTIONAL_FACTOR * errorUs, minSpeed, maxPlaybackSpeed);
 
         return adjustedSpeed;
     }
@@ -88,8 +139,27 @@ public final class TwitchLivePlaybackSpeedControl implements LivePlaybackSpeedCo
         return C.TIME_UNSET;
     }
 
+    public void reset() {
+        lastBucket = Long.MIN_VALUE;
+        windowFullAtMs = C.TIME_UNSET;
+        armed = false;
+        armDeadlineMs = C.TIME_UNSET;
+        armMaxSoFarUs = 0;
+        armLastNewMaxMs = C.TIME_UNSET;
+        stallExtraUs = 0;
+        lastStallMs = C.TIME_UNSET;
+        stallStreak = 0;
+        stallHoldMs = STALL_DECAY_HOLD_MS;
+        lastUpdateMs = C.TIME_UNSET;
+        adjustedSpeed = 1f;
+    }
+
     public long getWindowedMinMs() {
-        return Util.usToMs(windowedMinUs());
+        return armed ? Util.usToMs(windowedMinUs()) : -1;
+    }
+
+    private boolean isWarm(long nowMs) {
+        return windowFullAtMs != C.TIME_UNSET && nowMs >= windowFullAtMs;
     }
 
     public long getStallExtraMs() {
@@ -108,6 +178,7 @@ public final class TwitchLivePlaybackSpeedControl implements LivePlaybackSpeedCo
             for (long b = 0; b < clear; b++) {
                 bucketMinUs[(int) Math.floorMod(bucket - b, WINDOW_BUCKETS)] = Long.MAX_VALUE;
             }
+            if (clear == WINDOW_BUCKETS) windowFullAtMs = nowMs + WINDOW_BUCKETS * BUCKET_MS;
             lastBucket = bucket;
         }
 
@@ -124,9 +195,10 @@ public final class TwitchLivePlaybackSpeedControl implements LivePlaybackSpeedCo
     }
 
     private void decayStallExtra(long nowMs) {
-        if (stallExtraUs > 0 && lastStallMs != C.TIME_UNSET && nowMs - lastStallMs > STALL_DECAY_HOLD_MS) {
+        if (stallExtraUs > 0 && lastStallMs != C.TIME_UNSET && nowMs - lastStallMs > stallHoldMs) {
             if (lastDecayTickMs != C.TIME_UNSET) {
                 stallExtraUs = Math.max(0, stallExtraUs - (nowMs - lastDecayTickMs) * STALL_DECAY_US_PER_SECOND / 1000);
+                if (stallExtraUs == 0) stallStreak = 0;
             }
             lastDecayTickMs = nowMs;
         } else {

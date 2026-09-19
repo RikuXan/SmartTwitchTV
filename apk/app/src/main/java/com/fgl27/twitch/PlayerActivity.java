@@ -107,6 +107,8 @@ import net.grandcentrix.tray.AppPreferences;
 //Media3 issue TODO review and remove this when the problem is resolved
 public class PlayerActivity extends Activity {
 
+    private long BufferJitterEma = -1;
+
     private final String TAG = "STTV_PlayerActivity";
     private final Pattern TIME_NAME = Pattern.compile("time=([^\\s]+)");
 
@@ -655,6 +657,7 @@ public class PlayerActivity extends Activity {
         }
 
         PlayerObj[PlayerObjPosition].player.setPlayWhenReady(true);
+        if (PlayerObj[PlayerObjPosition].SpeedControl != null) PlayerObj[PlayerObjPosition].SpeedControl.reset();
         PlayerObj[PlayerObjPosition].player.setMediaSource(PlayerObj[PlayerObjPosition].mediaSources, PlayerObj[PlayerObjPosition].ResumePosition);
 
         PlayerObj[PlayerObjPosition].player.prepare();
@@ -3545,6 +3548,7 @@ public class PlayerActivity extends Activity {
                 long Duration = 0L;
                 long Position = 0L;
                 long BufferTarget = 0L;
+                long BufferJitter = 0L;
 
                 if (PlayerObj[0].player != null) {
                     buffer = PlayerObj[0].player.getTotalBufferedDuration();
@@ -3561,6 +3565,17 @@ public class PlayerActivity extends Activity {
                             if (CatchupWindow.liveConfiguration != null && CatchupWindow.liveConfiguration.targetOffsetMs != C.TIME_UNSET) {
                                 BufferTarget = CatchupWindow.liveConfiguration.targetOffsetMs +
                                 (PlayerObj[0].SpeedControl != null ? PlayerObj[0].SpeedControl.getStallExtraMs() : 0);
+                            }
+                        }
+
+                        if (BufferTarget > 0 && PlayerObj[0].SpeedControl != null) {
+                            long minMs = PlayerObj[0].SpeedControl.getWindowedMinMs();
+                            if (minMs >= 0) {
+                                long jitter = Math.max(0, buffer - minMs);
+                                BufferJitterEma = BufferJitterEma < 0 ? jitter : (BufferJitterEma * 3 + jitter) / 4;
+                                BufferJitter = BufferJitterEma;
+                            } else {
+                                BufferJitterEma = -1;
                             }
                         }
                     }
@@ -3580,7 +3595,8 @@ public class PlayerActivity extends Activity {
                             Duration, //8
                             Position, //9
                             PlayerObj[0].SpeedControl != null ? PlayerObj[0].SpeedControl.getAdjustedSpeed() : 1f, //10
-                            BufferTarget //11
+                            BufferTarget, //11
+                            BufferJitter //12
                         }
                     );
                 //Erase after read
