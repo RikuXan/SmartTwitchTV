@@ -171,6 +171,7 @@ public class PlayerActivity extends Activity {
     private boolean mWebViewKeyIsShowing = false;
     private long PlayerCurrentPosition = 0L;
     private long SmallPlayerCurrentPosition = 0L;
+    private long PPPlayerCurrentPosition = 0L;
     private int CurrentPositionTimeout = 500;
 
     private long droppedFrames = 0;
@@ -652,6 +653,10 @@ public class PlayerActivity extends Activity {
                 PlayerCurrentPosition = PlayerObj[PlayerObjPosition].ResumePosition == C.TIME_UNSET ? 0 : PlayerObj[PlayerObjPosition].ResumePosition;
 
                 GetCurrentPosition();
+            } else if (PlayerObjPosition == 1) {
+                PPPlayerCurrentPosition = PlayerObj[PlayerObjPosition].ResumePosition == C.TIME_UNSET
+                    ? 0
+                    : PlayerObj[PlayerObjPosition].ResumePosition;
             }
 
             hideLoading(5);
@@ -1230,6 +1235,7 @@ public class PlayerActivity extends Activity {
         CurrentPositionHandler[0].postDelayed(
                 () -> {
                     PlayerCurrentPosition = PlayerObj[0].player != null ? PlayerObj[0].player.getCurrentPosition() : 0L;
+                    PPPlayerCurrentPosition = PlayerObj[1].player != null ? PlayerObj[1].player.getCurrentPosition() : 0L;
 
                     GetCurrentPosition();
                 },
@@ -1583,7 +1589,8 @@ public class PlayerActivity extends Activity {
 
         unRegisterScreenReceiver();
 
-        updateResumePosition(0); //VOD only uses mainPlayer
+        updateResumePosition(0);
+        updateResumePosition(1); //A vod can sit in the picture in picture player too
         for (int i = 0; i < PlayerAccount; i++) {
             ClearPlayer(i);
         }
@@ -3329,6 +3336,11 @@ public class PlayerActivity extends Activity {
         }
 
         @JavascriptInterface
+        public long getsavedtimePP() {
+            return PlayerObj[1].ResumePosition;
+        }
+
+        @JavascriptInterface
         public long gettime() {
             return PlayerCurrentPosition > 0 ? PlayerCurrentPosition : 0;
         }
@@ -3336,6 +3348,11 @@ public class PlayerActivity extends Activity {
         @JavascriptInterface
         public long gettimepreview() {
             return SmallPlayerCurrentPosition > 0 ? SmallPlayerCurrentPosition : 0;
+        }
+
+        @JavascriptInterface
+        public long gettimePP() {
+            return PPPlayerCurrentPosition > 0 ? PPPlayerCurrentPosition : 0;
         }
 
         @JavascriptInterface
@@ -3737,7 +3754,7 @@ public class PlayerActivity extends Activity {
                             }
                         } else {
                             int OtherPlayer = position ^ 1;
-                            if (PlayerObj[OtherPlayer].player != null) {
+                            if (PlayerObj[OtherPlayer].player != null && PlayerObj[OtherPlayer].Type == 1) {
                                 if (!PlayerObj[OtherPlayer].player.isPlaying()) PlayerObj[OtherPlayer].player.setPlayWhenReady(true);
                             }
                         }
@@ -3754,7 +3771,7 @@ public class PlayerActivity extends Activity {
 
                             LoadUrlWebView("javascript:smartTwitchTV.ChatLive_SetLatency(" + position + "," + LiveOffset + ")");
                         }
-                    } else {
+                    } else if (position == 0) {
                         LoadUrlWebView("javascript:smartTwitchTV.Play_UpdateDuration(" + PlayerObj[position].player.getDuration() + ")");
                     }
                 } else {
