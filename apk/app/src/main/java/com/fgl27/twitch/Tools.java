@@ -39,6 +39,7 @@ import android.net.ConnectivityManager;
 import android.net.NetworkInfo;
 import android.net.Uri;
 import android.os.Build;
+import android.os.SystemClock;
 import android.os.Environment;
 import android.os.LocaleList;
 import android.util.Base64;
@@ -88,17 +89,23 @@ import java.io.OutputStream;
 import java.io.OutputStreamWriter;
 import java.lang.reflect.Type;
 import java.net.HttpURLConnection;
+import java.net.InetSocketAddress;
+import java.net.Socket;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Scanner;
 import java.util.Set;
 import java.util.StringTokenizer;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import net.grandcentrix.tray.AppPreferences;
 
 @SuppressLint("UnsafeOptInUsageError")
@@ -480,6 +487,95 @@ public final class Tools {
             .build();
     }
 
+    private static final Pattern INGEST_CLUSTER = Pattern.compile("rtmp://(([a-z]+)[0-9]*)\\.contribute\\.live-video\\.net");
+    private static final Pattern ORIGIN_CODE = Pattern.compile("([a-z]+)[0-9]*");
+    private static final float ORIGIN_RTT_CUSHION_FACTOR = 2.5f;
+    private static final int ORIGIN_EXTRA_MAX_MS = 1000;
+    private static final Map<String, String> ORIGIN_FAMILY_ALIASES = buildOriginFamilyAliases();
+    private static volatile Map<String, Integer> IngestRttMs = null;
+
+    private static Map<String, String> buildOriginFamilyAliases() {
+        Map<String, String> aliases = new HashMap<>();
+        String[][] families = {
+            { "euc", "fra", "muc", "ber", "vie", "prg", "waw", "bud" },
+            { "euw", "ams", "cdg", "lhr", "mad", "mil", "mrs", "lis" },
+            { "eun", "arn", "cph", "hel", "osl" },
+            { "use", "iad", "jfk", "atl", "mia", "bos", "phl", "ord", "dfw", "hou", "yto", "ymq" },
+            { "usw", "sfo", "sjc", "sea", "pdx", "lax", "phx", "slc", "den", "qro" },
+            { "sae", "gru", "sao", "scl", "eze", "lim", "bog", "rio" },
+            { "apn", "tyo", "osa", "sel", "icn", "hkg", "tpe" },
+            { "aps", "sin", "sgp", "bom", "hyd", "maa", "syd", "mel", "akl" },
+        };
+        for (String[] family : families) {
+            for (int i = 1; i < family.length; i++) aliases.put(family[i], family[0]);
+        }
+        return aliases;
+    }
+
+    static void ProbeIngestRtts() {
+        ResponseObj response = Internal_MethodUrl("https://ingest.twitch.tv/ingests", 10000, null, null, 0, new String[0][]);
+        if (response == null || response.status != 200 || response.responseText == null) return;
+
+        Map<String, Integer> table = new HashMap<>();
+        Set<String> probed = new HashSet<>();
+        Matcher matcher = INGEST_CLUSTER.matcher(response.responseText);
+
+        while (matcher.find()) {
+            String cluster = matcher.group(1);
+            String family = matcher.group(2);
+            if (!probed.add(cluster)) continue;
+
+            int best = -1;
+            for (int attempt = 0; attempt < 2; attempt++) {
+                long start = SystemClock.elapsedRealtime();
+                try (Socket socket = new Socket()) {
+                    socket.connect(new InetSocketAddress(cluster + ".contribute.live-video.net", 1935), 3000);
+                    int rtt = (int) (SystemClock.elapsedRealtime() - start);
+                    if (best == -1 || rtt < best) best = rtt;
+                } catch (Throwable ignore) {}
+            }
+            if (best == -1) continue;
+
+            //Family keeps its worst member so far-flung clusters like Sydney never get understated
+            Integer known = table.get(family);
+            table.put(family, known == null ? best : Math.max(known, best));
+        }
+
+        if (!table.isEmpty()) IngestRttMs = table;
+    }
+
+    public static class OriginCushion implements HlsMediaSource.OriginCushionProvider {
+
+        public volatile String code = "";
+        public volatile int extraMs = 0;
+
+        @Override
+        public int getOriginCushionExtraMs(String originCode) {
+            code = originCode != null ? originCode : "";
+            extraMs = OriginCushionExtraMs(originCode);
+            return extraMs;
+        }
+    }
+
+    static int OriginCushionExtraMs(String originCode) {
+        Map<String, Integer> table = IngestRttMs;
+        if (table == null || table.isEmpty()) return 0;
+
+        Integer rtt = null;
+        if (originCode != null) {
+            Matcher matcher = ORIGIN_CODE.matcher(originCode);
+            if (matcher.matches()) {
+                String family = matcher.group(1);
+                if (!table.containsKey(family)) family = ORIGIN_FAMILY_ALIASES.get(family);
+                if (family != null) rtt = table.get(family);
+            }
+        }
+        //An origin the probe never saw may be anywhere, price it as the worst known one
+        if (rtt == null) rtt = Collections.max(table.values());
+
+        return Math.min(ORIGIN_EXTRA_MAX_MS, Math.round(ORIGIN_RTT_CUSHION_FACTOR * rtt));
+    }
+
     static MediaSource buildMediaSource(
         Uri uri,
         Context context,
@@ -488,7 +584,8 @@ public final class Tools {
         int LowLatencyTargetMs,
         boolean speedAdjustment,
         String mainPlaylist,
-        String userAgent
+        String userAgent,
+        OriginCushion originCushion
     ) {
         if (Type == 1) {
             //Twitch only serves low latency playlists (prefetch segments) when asked via fast_bread,
@@ -502,6 +599,7 @@ public final class Tools {
                 .setAllowChunklessPreparation(true)
                 .setLowLatency(LowLatency)
                 .setLowLatencyTargetMs(LowLatencyTargetMs)
+                .setOriginCushionProvider(LowLatency == 1 ? originCushion : null)
                 .setspeedAdjustment(speedAdjustment)
                 .createMediaSource(MediaItemBuilder(uri));
         } else if (Type == 2) {
