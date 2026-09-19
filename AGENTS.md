@@ -76,14 +76,19 @@ build, and the change must be committed in that repo separately from the app rep
 
 ### What is patched
 
-Four upstream files differ from `4d0e670`, across six commits:
+Thirteen upstream files differ from `4d0e670`, across eight commits, in three groups:
 
 | File | Change |
 | --- | --- |
 | `libraries/exoplayer_hls/.../hls/playlist/HlsPlaylistParser.java` | Parses `#EXT-X-TWITCH-PREFETCH` (the unadvertised next segments Twitch exposes with `fast_bread=true`) and `#EXT-X-TWITCH-INFO`, and retains all `#EXT` tags on the parsed playlist so consumers can read them. |
 | `libraries/exoplayer_hls/.../hls/playlist/DefaultHlsPlaylistParserFactory.java` | Factory wiring for the parser above. |
 | `libraries/exoplayer_hls/.../hls/HlsMediaSource.java` | The low-latency surface: `Factory.setLowLatencyTargetMs`, the `OriginCushionProvider` interface plus `Factory.setOriginCushionProvider`, `REGEX_TWITCH_ORIGIN` to read `ORIGIN="…"` off the loaded multivariant playlist, `originCushionExtraMs()` with retry-while-unresolved, and `updateLiveConfiguration` computing target/max offset and the speed bounds. |
-| `libraries/exoplayer/.../audio/DefaultAudioSink.java` | A `pitchFollowsSpeed` static toggle, left in place but **unused** — the pitch-modulation approach to catch-up audio was rejected as audible. |
+| `libraries/extractor/.../metadata/emsg/EventMessage.java`, `.../mp4/FragmentedMp4Extractor.java` | Keeps the presentation timestamp on Twitch's timed metadata instead of discarding it, which is what `TwitchBroadcastLatency` measures broadcast delay from. Covered by `FragmentedMp4EmsgTimestampTest`. |
+| `libraries/exoplayer/.../mediacodec/CodecTimingHistory.java` (new), `.../mediacodec/MediaCodecRenderer.java`, `.../source/SampleStream.java`, `.../video/MediaCodecVideoRenderer.java`, `libraries/exoplayer_hls/.../HlsSampleStream.java`, `.../HlsSampleStreamWrapper.java` | Per-track delivery and decoder timing diagnostics — the queued sample endpoint, decoder input/output timestamps and codec residence that the `TRACK-TIMING` log lines report. Covered by `CodecTimingHistoryTest`. |
+
+`DefaultAudioSink.java`'s `pitchFollowsSpeed` toggle is **not** in `main`. The pitch-modulation
+approach to catch-up audio was rejected as audible, and the change lives unmerged on
+`exp/audio-pitch-follows-speed` in the fork.
 
 The app side connects to it in `Tools.buildMediaSource(...)`, which calls
 `.setLowLatencyTargetMs(LowLatencyTargetMs)` and
@@ -349,6 +354,44 @@ Consequences worth knowing before changing any of it:
   `Play_Start` hand slot 0 a new source, which is how the live only case already behaved.
 - A stream that moves between the windows keeps its `watching_time`. Only a genuinely new stream
   restarts that counter.
+
+## Presence
+
+`app/specific/Presence.js` makes Twitch credit the account for what the app plays, which it
+otherwise does not: channel points, watch streaks, drop progress and watch time all depend on the
+web player reporting itself. Nothing here affects playback; it only reports.
+
+A 60 s tick (`Presence_Tick`) drives everything, keyed by channel id so picture in picture and
+multistream each report separately. Per tick it reconciles the watched set against
+`Presence_WatchedChannels()` and drops the per-channel state of anything no longer playing.
+
+Two endpoints are involved:
+
+- `gql.twitch.tv/gql` for `ChannelPage_SetSessionStatus` (presence), `ChannelPointsContext` and
+  `ClaimCommunityPoints` (balance plus bonus chests, every 120 s), `DropChannelCampaignsProgress`
+  with `Inventory` and `DropsPage_ClaimDropRewards` (drops, every 300 s), and
+  `updateUserViewedVideo` for VOD progress.
+- `spade.twitch.tv/track` for the `minute-watched` event, which is what actually credits watch
+  time and streaks.
+
+Things that are easy to break:
+
+- The spade event must carry `game` and `game_id`. Without the category it still credits points but
+  **no drop progress**, because campaigns are keyed by game. Spade also only reads the event out of
+  a batch array, never a bare object.
+- `broadcast_id` and the category have to stay current, so `Presence_Info` refreshes them rather
+  than caching once per channel.
+- The inventory sweep runs whatever is playing, and an empty inventory is a valid answer, not a
+  failure to retry.
+
+`OSInterface_PresenceLog` sends every ping to `TwitchDiagnosticLog`, so
+`adb logcat -s TwitchLL | grep presence` shows the whole loop. That gating differs by branch — see
+the note under Branches.
+
+## Other app changes
+
+`feat/settings-block-160p` adds 160p to the resolution block list in `app/specific/Settings.js`.
+It is unrelated to everything else and rode along on the original mixed branch by accident.
 
 ## Branches
 
