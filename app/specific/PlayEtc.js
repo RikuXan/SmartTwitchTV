@@ -1288,7 +1288,6 @@ function Play_CheckLiveThumb(PreventResetFeed, PreventWarn) {
     return null;
 }
 
-//The main player holds the other kind of content, so only the small window can already hold this one
 function Play_PPIsAlredyOpen(obj, isVodScreen) {
     if (!PlayExtra_PicturePicture) return false;
 
@@ -1558,7 +1557,7 @@ function Play_PP_Multi_KeyDownHold() {
             if (Play_audio_enable[0] && Play_audio_enable[1]) Play_audio_enable[1] = 0;
             else if (!Play_audio_enable[0] && !Play_audio_enable[1]) Play_audio_enable[0] = 1;
 
-            text = Play_audio_enable[0] ? Play_data.data[1] : PlayExtra_data.data[1];
+            text = Play_audio_enable[0] ? PlayExtra_MainName() : PlayExtra_data.data[1];
         } else {
             var i = 0,
                 len = 4;
@@ -4092,7 +4091,7 @@ function Play_SetControlsVisibility(prop) {
     }
 }
 
-//A control only survives a combined mode, live in the small window over a vod, when both modes want it
+//A combined mode passes several props, a control shows only when every one of them wants it
 function Play_ControlShowsInAll(key, props) {
     var i = 0,
         len = props.length;
