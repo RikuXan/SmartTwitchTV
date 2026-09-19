@@ -422,6 +422,17 @@ function OSInterface_setSpeedAdjustment(speedAdjustment) {
     }
 }
 
+//public void PresenceLog(String log)
+//Android specific: true
+//log the Twitch watch presence pings, kept in release builds to spot integrity failures
+function OSInterface_PresenceLog(log) {
+    if (Main_IsOn_OSInterface) {
+        try {
+            Android.PresenceLog(log);
+        } catch (e) {}
+    }
+}
+
 //public void setAppToken(String token)
 //token =  token to save
 //Sets the app token when value is updated from JS
