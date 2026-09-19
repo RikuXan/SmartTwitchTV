@@ -314,6 +314,26 @@ var streamGamePP = [];
 var streamViewersPP = [];
 var updateLogoPPDiv = [];
 var updateLogoPPLogo = [];
+var updateLogoPPOwner = [];
+
+//Both halves write this element, so only a change of owner may blank one, a logo that has not
+//arrived yet must leave the picture that is up alone
+function PlayExtra_SetPanelLogo(pp, owner, logo) {
+    var changed = !Main_A_equals_B(updateLogoPPOwner[pp], owner);
+
+    updateLogoPPOwner[pp] = owner;
+
+    if (!logo) {
+        if (!changed) return;
+
+        logo = IMG_404_BANNER;
+    }
+
+    if (updateLogoPPLogo[pp] === logo) return;
+
+    Main_getElementById('stream_info_ppimg' + pp).src = logo;
+    updateLogoPPLogo[pp] = logo;
+}
 
 function PlayExtra_UpdatePanel() {
     var vodSide = PlayExtraVod_Side();
@@ -349,7 +369,7 @@ function PlayExtra_UpdatePanelLive(pp) {
 
     if (!obj.data || !obj.data.length) return;
 
-    Main_getElementById('stream_info_ppimg' + pp).src = obj.data[9] ? obj.data[9] : IMG_404_BANNER;
+    PlayExtra_SetPanelLogo(pp, obj.data[14], obj.data[9]);
 
     PlayExtra_updateStreamLogo(obj.data[14], pp);
 
@@ -373,6 +393,7 @@ function PlayExtra_UpdatePanelLive(pp) {
 }
 
 var PlayExtra_updateStreamLogoValuesId = [];
+var PlayExtra_updateStreamLogoPending = [];
 function PlayExtra_updateStreamLogo(channelId, pp) {
     var obj = !pp ? Play_data : PlayExtra_data;
 
@@ -380,10 +401,18 @@ function PlayExtra_updateStreamLogo(channelId, pp) {
         PlayExtra_updateLogo(pp);
     }
 
+    //A refresh every second would keep invalidating the request the refresh before it sent
+    if (Main_A_equals_B(PlayExtra_updateStreamLogoPending[pp], channelId)) return;
+
+    PlayExtra_updateStreamLogoPending[pp] = channelId;
     PlayExtra_updateStreamLogoValuesId[pp] = new Date().getTime();
     var theUrl = Main_helix_api + 'users?id=' + channelId;
 
-    BaseXmlHttpGet(theUrl, PlayExtra_updateStreamLogoValues, noop_fun, pp, PlayExtra_updateStreamLogoValuesId[pp], true);
+    BaseXmlHttpGet(theUrl, PlayExtra_updateStreamLogoValues, PlayExtra_updateStreamLogoError, pp, PlayExtra_updateStreamLogoValuesId[pp], true);
+}
+
+function PlayExtra_updateStreamLogoError(pp, ID) {
+    if (PlayExtra_updateStreamLogoValuesId[pp] === ID) PlayExtra_updateStreamLogoPending[pp] = null;
 }
 
 function PlayExtra_updateStreamLogoValues(responseText, pp, ID) {
@@ -425,13 +454,7 @@ function PlayExtra_updateLogo(pp) {
 
     updateLogoPPDiv[pp] = div;
 
-    var logo = obj.data[9] ? obj.data[9] : IMG_404_BANNER;
-
-    if (updateLogoPPLogo[pp] !== logo) {
-        Main_getElementById('stream_info_ppimg' + pp).src = logo;
-    }
-
-    updateLogoPPLogo[pp] = logo;
+    PlayExtra_SetPanelLogo(pp, obj.data[14], obj.data[9]);
 }
 
 function PlayExtra_loadDataFail(Reason) {

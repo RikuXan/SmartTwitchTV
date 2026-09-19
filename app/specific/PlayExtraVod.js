@@ -303,13 +303,7 @@ function PlayExtraVod_UpdateLogo(pp) {
     }
     updateLogoPPDiv[pp] = div;
 
-    //Always write the image, the other side of the panel wrote this element while the vod sat elsewhere
-    var logo = store.channelLogo ? store.channelLogo : IMG_404_BANNER;
-
-    if (updateLogoPPLogo[pp] !== logo) {
-        Main_getElementById('stream_info_ppimg' + pp).src = logo;
-    }
-    updateLogoPPLogo[pp] = logo;
+    PlayExtra_SetPanelLogo(pp, store.vodId, store.channelLogo);
 
     if (store.channelLogo || store.logoId) return;
 

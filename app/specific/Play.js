@@ -709,6 +709,8 @@ function Play_ResetStreamInfo() {
     for (var pp = 0; pp < 2; pp++) {
         updateLogoPPDiv[pp] = null;
         updateLogoPPLogo[pp] = null;
+        updateLogoPPOwner[pp] = null;
+        PlayExtra_updateStreamLogoPending[pp] = null;
         streamTitlePP[pp] = null;
         streamGamePP[pp] = null;
         streamViewersPP[pp] = null;
