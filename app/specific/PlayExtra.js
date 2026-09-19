@@ -428,6 +428,14 @@ function PlayExtra_updateStreamLogoValues(responseText, pp, ID) {
     var response = JSON.parse(responseText);
 
     if (response.data && response.data.length && PlayExtra_updateStreamLogoValuesId[pp] === ID) {
+        //A vod keeps the channel of the live stream it replaced, so the id below cannot tell that
+        //this half stopped being the live one while the request was out
+        if (pp === PlayExtraVod_Side()) {
+            PlayExtra_updateStreamLogoPending[pp] = null;
+
+            return;
+        }
+
         //TODO update this with a API that provides logo and is partner
         var objData = response.data[0];
 
