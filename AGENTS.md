@@ -138,6 +138,14 @@ Gradle invocation when a debug APK is wanted; the release build alone is enough 
 The named volumes keep the Gradle cache and the SDK's `.android` state across runs — without them
 every build re-downloads dependencies.
 
+A container killed mid-build leaves its lock files in `stv-gradle-cache`, and the next build dies in
+service creation with "Timeout waiting to lock journal cache". Clear them before retrying:
+
+```bash
+docker run --rm -v stv-gradle-cache:/root/.gradle alpine \
+  sh -c 'find /root/.gradle -name "*.lock" -delete; rm -rf /root/.gradle/daemon'
+```
+
 ## Sign
 
 The release build type has no `signingConfig`, so Gradle emits `app-release-unsigned.apk`.
