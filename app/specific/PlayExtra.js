@@ -322,6 +322,8 @@ function PlayExtra_UpdatePanel() {
         if (pp === vodSide) PlayExtraVod_UpdatePanelSide(pp);
         else PlayExtra_UpdatePanelLive(pp);
     }
+
+    if (PlayExtra_PicturePicture) Play_RefreshWatchingTime();
 }
 
 function PlayExtra_RefreshPPTimes(pp, dateNow) {

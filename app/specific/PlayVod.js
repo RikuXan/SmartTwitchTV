@@ -630,7 +630,8 @@ function PlayVod_showPanel(autoHide) {
 function PlayVod_RefreshProgressBarrStart(showVideoQuality, who_called) {
     PlayVod_getVideoQualityRate = 0;
 
-    if (Play_isOn) Play_RefreshWatchingTime();
+    //Play_isOn is false while a vod is the main player, but the pair still has a live half to tick
+    if (Play_isOn || PlayExtra_PicturePicture) Play_RefreshWatchingTime();
 
     PlayVod_ProgressBarrUpdateNoAnimation(
         OSInterface_gettime() / 1000,
@@ -675,7 +676,7 @@ function PlayVod_RefreshProgressBarr(showVideoQuality, who_called) {
         else Play_VideoStatusTest();
     }
 
-    if (Play_isOn) Play_RefreshWatchingTime();
+    if (Play_isOn || PlayExtra_PicturePicture) Play_RefreshWatchingTime();
 }
 
 function PlayVod_ProgressBarrUpdateNoAnimation(current_time_seconds, duration_seconds, update_bar, callVideoQuality, showVideoQuality, who_called) {
