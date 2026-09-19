@@ -36,6 +36,11 @@ function PlayExtra_KeyEnter() {
 
     if (!Play_preventVodOnPP()) return;
 
+    if (PlayExtraVod_InPP) PlayExtraVod_ClearPP();
+
+    //The main player already holds the vod, the panel still has to render it beside the new live stream
+    if (PlayVod_isOn) PlayExtraVod_Store = PlayExtraVod_StoreFromMain();
+
     var doc = Play_CheckLiveThumb(false, false);
 
     if (doc) {
@@ -62,12 +67,19 @@ function PlayExtra_KeyEnter() {
 
         if (Main_IsOn_OSInterface) {
             //Not on auto mode for change to auto before start picture in picture
-            if (!Main_A_includes_B(Play_data.quality, 'Auto')) {
+            if (!Main_A_includes_B(PlayVod_isOn ? PlayVod_quality : Play_data.quality, 'Auto')) {
                 OSInterface_SetQuality(-1);
             }
 
-            Play_SetPlayQuality('Auto');
-            Play_qualityDisplay(Play_getQualitiesCount, 0, Play_SetHtmlQuality, Play_controls[Play_controlsQuality]);
+            if (PlayVod_isOn) {
+                PlayVod_quality = 'Auto';
+                PlayVod_qualityPlaying = PlayVod_quality;
+                Play_qualityDisplay(PlayVod_getQualitiesCount, 0, PlayVod_SetHtmlQuality, Play_controls[Play_controlsQuality]);
+            } else {
+                Play_SetPlayQuality('Auto');
+                Play_qualityDisplay(Play_getQualitiesCount, 0, Play_SetHtmlQuality, Play_controls[Play_controlsQuality]);
+            }
+
             PlayExtra_data.quality = 'Auto';
             PlayExtra_data.qualityPlaying = PlayExtra_data.quality;
         }
@@ -110,7 +122,7 @@ function PlayExtra_Resume(synchronous) {
 }
 
 function PlayExtra_ResumeResult(response) {
-    if (PlayExtra_PicturePicture && Play_isOn && response) {
+    if (PlayExtra_PicturePicture && (Play_isOn || PlayVod_isOn) && response) {
         var responseObj = JSON.parse(response);
 
         if (responseObj.checkResult > 0 && responseObj.checkResult === PlayExtra_ResumeId) {
@@ -151,7 +163,7 @@ function PlayExtra_loadDataSuccessEnd(playlist, PreventCleanQualities) {
         Play_SetChatSideBySide();
     } else OSInterface_mSwitchPlayerSize(Play_PicturePictureSize);
 
-    if (Main_IsOn_OSInterface && Play_isOn) {
+    if (Main_IsOn_OSInterface && (Play_isOn || PlayVod_isOn)) {
         if (PreventCleanQualities) {
             OSInterface_ReuseFeedPlayer(PlayExtra_data.AutoUrl, PlayExtra_data.playlist, 1, 0, 1);
         } else {
@@ -235,6 +247,12 @@ function PlayExtra_HideChat() {
 function PlayExtra_End(doSwitch, fail_type) {
     // Called only by JAVA
 
+    if (PlayExtraVod_EndedIsVod(doSwitch)) {
+        PlayExtraVod_End(doSwitch, fail_type);
+
+        return;
+    }
+
     if (!fail_type && Settings_value.open_host.defaultValue) {
         Play_showWarningMiddleDialog(PlayExtra_data.data[1] + ' ' + STR_LIVE + STR_IS_OFFLINE + STR_CHECK_HOST, 2000);
 
@@ -251,8 +269,7 @@ function PlayExtra_End_success(doSwitch, fail_type, errorCode) {
     //Some player ended switch and warn
     if (doSwitch) {
         //Main player has end switch and close
-        OSInterface_mSwitchPlayer();
-        PlayExtra_SwitchPlayer();
+        PlayExtra_DoSwitch();
     }
 
     Play_showWarningMiddleDialog(reason + Play_GetErrorCode(errorCode), 2500 + (fail_type ? 2500 : 0));
@@ -264,7 +281,7 @@ function PlayExtra_SetPanel() {
     Play_controls[Play_controlsChatSide].setLabel();
     Play_controls[Play_controlsChatSide].setIcon();
 
-    Play_SetControlsVisibility('ShowInPP');
+    Play_SetControlsVisibilityPlayer(PlayVod_isOn ? 2 : 1);
 
     Main_HideElement('stream_info');
     Main_ShowElement('stream_info_pp');
@@ -275,7 +292,7 @@ function PlayExtra_UnSetPanel() {
     Play_controls[Play_controlsChatSide].setLabel();
     Play_controls[Play_controlsChatSide].setIcon();
 
-    Play_SetControlsVisibility('ShowInLive');
+    Play_SetControlsVisibilityPlayer(PlayVod_isOn ? 2 : 1);
 
     ChatLive_Clear(1);
     PlayExtra_HideChat();
@@ -287,74 +304,66 @@ function PlayExtra_UnSetPanel() {
 }
 
 function PlayExtra_ClearExtra() {
+    PlayExtraVod_ClearPP();
     PlayExtra_PicturePicture = false;
     PlayExtra_data = JSON.parse(JSON.stringify(Play_data_base));
 }
 
-var streamTitle1;
-var streamGame1;
-var streamViewers1;
-
-var streamTitle2;
-var streamGame2;
-var streamViewers2;
+var streamTitlePP = [];
+var streamGamePP = [];
+var streamViewersPP = [];
+var updateLogoPPDiv = [];
+var updateLogoPPLogo = [];
 
 function PlayExtra_UpdatePanel() {
-    //Main
-    if (Play_data.data[9]) {
-        Main_getElementById('stream_info_ppimg0').src = Play_data.data[9];
+    if (PlayExtraVod_IsMixed()) {
+        var vodSide = PlayExtraVod_InPP ? 1 : 0;
+
+        PlayExtraVod_UpdatePanelSide(vodSide);
+        PlayExtra_UpdatePanelLive(vodSide ? 0 : 1);
+
+        return;
     }
 
-    PlayExtra_updateStreamLogo(Play_data.data[14], 0);
+    PlayExtra_UpdatePanelLive(0);
+    PlayExtra_UpdatePanelLive(1);
+}
 
-    if (streamTitle1 !== Play_data.data[2]) {
-        Main_innerHTML('stream_info_pp_title0', twemoji.parse(Play_data.data[2], false, true));
+function PlayExtra_UpdatePanelLive(pp) {
+    var obj = !pp ? Play_data : PlayExtra_data;
+
+    if (!obj.data || !obj.data.length) return;
+
+    if (obj.data[9]) {
+        Main_getElementById('stream_info_ppimg' + pp).src = obj.data[9];
     }
-    streamTitle1 = Play_data.data[2];
 
-    if (streamGame1 !== Play_data.data[3]) {
-        Main_innerHTML('stream_info_pp_game0', Play_data.data[3] === '' ? STR_SPACE_HTML : STR_PLAYING + Play_data.data[3]);
+    PlayExtra_updateStreamLogo(obj.data[14], pp);
+
+    if (streamTitlePP[pp] !== obj.data[2]) {
+        Main_innerHTML('stream_info_pp_title' + pp, twemoji.parse(obj.data[2], false, true));
     }
-    streamGame1 = Play_data.data[3];
+    streamTitlePP[pp] = obj.data[2];
 
-    if (streamViewers1 !== Play_data.data[13]) {
+    if (streamGamePP[pp] !== obj.data[3]) {
+        Main_innerHTML('stream_info_pp_game' + pp, obj.data[3] === '' ? STR_SPACE_HTML : STR_PLAYING + obj.data[3]);
+    }
+    streamGamePP[pp] = obj.data[3];
+
+    if (streamViewersPP[pp] !== obj.data[13]) {
         Main_innerHTML(
-            'stream_info_pp_viewers0',
-            STR_FOR + Main_formatNumber(Play_data.data[13]) + STR_SPACE_HTML + Main_GetViewerStrings(Play_data.data[13]) + ','
+            'stream_info_pp_viewers' + pp,
+            STR_FOR + Main_formatNumber(obj.data[13]) + STR_SPACE_HTML + Main_GetViewerStrings(obj.data[13]) + ','
         );
     }
-    streamViewers1 = Play_data.data[13];
-
-    //pp
-    if (PlayExtra_data.data[9]) {
-        Main_getElementById('stream_info_ppimg1').src = PlayExtra_data.data[9];
-    }
-    PlayExtra_updateStreamLogo(PlayExtra_data.data[14], 1);
-
-    if (streamTitle2 !== PlayExtra_data.data[2]) {
-        Main_innerHTML('stream_info_pp_title1', twemoji.parse(PlayExtra_data.data[2], false, true));
-    }
-    streamTitle2 = PlayExtra_data.data[2];
-
-    if (streamGame2 !== PlayExtra_data.data[3]) {
-        Main_innerHTML('stream_info_pp_game1', PlayExtra_data.data[3] === '' ? STR_SPACE_HTML : STR_PLAYING + PlayExtra_data.data[3]);
-    }
-    streamGame2 = PlayExtra_data.data[3];
-
-    if (streamViewers2 !== PlayExtra_data.data[13]) {
-        Main_innerHTML(
-            'stream_info_pp_viewers1',
-            STR_FOR + Main_formatNumber(PlayExtra_data.data[13]) + STR_SPACE_HTML + Main_GetViewerStrings(PlayExtra_data.data[13]) + ','
-        );
-    }
-    streamViewers2 = PlayExtra_data.data[13];
+    streamViewersPP[pp] = obj.data[13];
 }
 
 var PlayExtra_updateStreamLogoValuesId = [];
 function PlayExtra_updateStreamLogo(channelId, pp) {
-    if (!pp && Play_data.data && Play_data.data.length && Play_data.data[10] !== null && Play_data.data[9] !== null) {
-        PlayExtra_updateLogo(pp);
-    } else if (pp && PlayExtra_data.data && PlayExtra_data.data.length && PlayExtra_data.data[10] !== null && PlayExtra_data.data[9] !== null) {
+    var obj = !pp ? Play_data : PlayExtra_data;
+
+    if (obj.data && obj.data.length && obj.data[10] !== null && obj.data[9] !== null) {
         PlayExtra_updateLogo(pp);
     }
 
@@ -365,11 +374,9 @@ function PlayExtra_updateStreamLogo(channelId, pp) {
 }
 
 function PlayExtra_updateStreamLogoValues(responseText, pp, ID) {
-    if (!pp && (!Play_data || !Play_data.data || !Play_data.data.length)) {
-        return;
-    }
+    var obj = !pp ? Play_data : PlayExtra_data;
 
-    if (pp && (!PlayExtra_data || !PlayExtra_data.data || !PlayExtra_data.data.length)) {
+    if (!obj || !obj.data || !obj.data.length) {
         return;
     }
 
@@ -379,67 +386,37 @@ function PlayExtra_updateStreamLogoValues(responseText, pp, ID) {
         //TODO update this with a API that provides logo and is partner
         var objData = response.data[0];
 
-        if (!pp && Main_A_equals_B(objData.id, Play_data.data[14])) {
-            Play_data.data[10] = objData.broadcaster_type === 'partner';
-            Play_data.data[9] = objData.profile_image_url;
-
-            PlayExtra_updateLogo(pp);
-        } else if (Main_A_equals_B(objData.id, PlayExtra_data.data[14])) {
-            PlayExtra_data.data[10] = objData.broadcaster_type === 'partner';
-            PlayExtra_data.data[9] = objData.profile_image_url;
+        if (Main_A_equals_B(objData.id, obj.data[14])) {
+            obj.data[10] = objData.broadcaster_type === 'partner';
+            obj.data[9] = objData.profile_image_url;
 
             PlayExtra_updateLogo(pp);
         }
     }
 }
 
-var updateLogoPPDiv;
-var updateLogoMainDiv;
-
-var updateLogoPPLogo;
-var updateLogoMainLogo;
 function PlayExtra_updateLogo(pp) {
-    var div;
-    if (!pp) {
-        div = Play_partnerIcon(
-            Play_data.isHost ? Play_data.DisplayNameHost : Play_data.data[1],
-            Play_data.data[10],
-            0,
-            Play_data.data[5] ? '[' + Play_data.data[5].split('[')[1] : '',
-            Play_data.data[8]
-        );
+    var obj = !pp ? Play_data : PlayExtra_data;
 
-        if (updateLogoMainDiv !== div) {
-            Main_innerHTML('stream_info_pp_name0', div);
-        }
+    var div = Play_partnerIcon(
+        obj.isHost ? obj.DisplayNameHost : obj.data[1],
+        obj.data[10],
+        0,
+        obj.data[5] ? '[' + obj.data[5].split('[')[1] : '',
+        obj.data[8]
+    );
 
-        updateLogoMainDiv = div;
-
-        if (updateLogoMainLogo !== Play_data.data[9]) {
-            Main_getElementById('stream_info_ppimg0').src = Play_data.data[9];
-        }
-
-        updateLogoMainLogo = Play_data.data[9];
-    } else {
-        div = Play_partnerIcon(
-            PlayExtra_data.isHost ? PlayExtra_data.DisplayNameHost : PlayExtra_data.data[1],
-            PlayExtra_data.data[10],
-            0,
-            PlayExtra_data.data[5] ? '[' + PlayExtra_data.data[5].split('[')[1] : '',
-            PlayExtra_data.data[8]
-        );
-
-        if (updateLogoPPDiv !== div) {
-            Main_innerHTML('stream_info_pp_name1', div);
-        }
-        updateLogoPPDiv = div;
-
-        if (updateLogoPPLogo !== Play_data.data[9]) {
-            Main_getElementById('stream_info_ppimg1').src = PlayExtra_data.data[9];
-        }
-
-        updateLogoPPLogo = PlayExtra_data.data[9];
+    if (updateLogoPPDiv[pp] !== div) {
+        Main_innerHTML('stream_info_pp_name' + pp, div);
     }
+
+    updateLogoPPDiv[pp] = div;
+
+    if (updateLogoPPLogo[pp] !== obj.data[9]) {
+        Main_getElementById('stream_info_ppimg' + pp).src = obj.data[9];
+    }
+
+    updateLogoPPLogo[pp] = obj.data[9];
 }
 
 function PlayExtra_loadDataFail(Reason) {
