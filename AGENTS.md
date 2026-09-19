@@ -259,6 +259,52 @@ The Mac-side capture is only a live convenience: laptop sleep suspends its relay
 creates gaps. Read on-device files for playback during those gaps. Android's logcat ring buffer
 cannot recover hours after the fact. File capture does not need the Mac or ADB connection alive.
 
+## Building from a worktree
+
+`apk/settings.gradle` resolves `mediaRoot` as `$rootDir/../../media`, which from a worktree under
+`.claude/worktrees/<name>/apk` lands on `.claude/worktrees/media` rather than the sibling checkout.
+Bind mount the media clone at that path instead of creating it on disk:
+
+```bash
+docker run -d --name stv-build \
+  -v /Users/philipp.holler/Code/github/RikuXan:/work \
+  -v /Users/philipp.holler/Code/github/RikuXan/media:/work/SmartTwitchTV/.claude/worktrees/media \
+  -v stv-gradle-cache:/root/.gradle -v stv-android-config:/root/.android \
+  -w /work/SmartTwitchTV/.claude/worktrees/<name>/apk stv-android-build-ndk ./gradlew assembleRelease --no-daemon
+```
+
+A fresh worktree also has no `apk/app/src/main/assets/` and no `apk/app/google-services.json`;
+create the first with the rsync above and copy the second from the main checkout.
+
+## VOD in picture in picture
+
+`app/specific/PlayExtraVod.js` lets a VOD and a live stream play together, either way round, and
+swaps them with the same DOWN press that swaps two live streams.
+
+Only one VOD plays at a time, because `PlayVod_*`, `ChannelVod_*` and `Main_values.ChannelVod_*` are
+a singleton that always describes whichever VOD sits in the **main** player. `PlayExtraVod_Store`
+holds that same state while the VOD sits in the small player, and `PlayExtraVod_InPP` says which of
+the two is the case. Swapping copies the state across and hands the player screen from one mode's UI
+to the other (`PlayExtraVod_EnterVodMain` / `PlayExtraVod_EnterLiveMain`) without restarting either
+playback — Java's `SwitchPlayer` already swaps `PlayerObj[0]` and `PlayerObj[1]` including their
+`Type`, so seeking, duration and pause keep targeting slot 0 and need no slot parameter.
+
+Consequences worth knowing before changing any of it:
+
+- Live and VOD feed cells use **different array indices** (`[2]` title vs created-at, `[9]` logo vs
+  language, `[10]` partner vs title, `[13]` viewers vs views). `PlayExtra_UpdatePanel` therefore
+  renders the VOD side from `PlayExtraVod_Store`, never from the cell, and the channel logo is
+  fetched from the users API because `Main_values.Main_selectedChannelLogo` holds the VOD duration in
+  VOD mode.
+- The panel control set for the combined mode is `ShowInVod` **and** `ShowInPP`
+  (`Play_ControlsVodPP`); `Play_SetControlsVisibility` accepts an array for this.
+- A VOD in the small window gets no chat. The VOD replay chat is a singleton bound to container 0 and
+  the main player's position, so it only runs when the VOD is the big player.
+- Multistream stays live only and refuses while a VOD is in the small window.
+- `gettimePP` / `getsavedtimePP` expose slot 1's position so the small VOD keeps its place across a
+  switch and a trip through the background. The bridge refreshes the live value every 500 ms, so a
+  read right after a switch still reports the player that used to be there.
+
 ## Branches
 
 `RikuXan/SmartTwitchTV` is `origin` and the primary workspace. `upstream` is `fgl27/SmartTwitchTV`;
@@ -296,10 +342,11 @@ feat/twitch-prefetch            EXT-X-TWITCH-PREFETCH parsing
     └ feat/hls-origin-cushion   cushion from the multivariant playlist
 ```
 
-`integration` in each repo is every branch merged together. It is what gets built and deployed, and
-it reproduces the pre-split tree exactly — `git diff archive/ll-dev-2026-09-19 integration` is empty
-but for one doc comment moved back onto its own function. Re-run that diff after changing a feature
-branch to prove nothing was dropped.
+`integration` in each repo is every branch merged together, and is what gets built and deployed.
+When it was created it reproduced the pre-split tree exactly, `git diff archive/ll-dev-2026-09-19
+integration` showing only one doc comment moved back onto its own function. It has since gained
+`feat/pip-vod`, so that diff is no longer the losslessness check — compare a feature branch against
+its own `archive/*` ancestor instead.
 
 Never move `feat/low-latency-improvements` or `feat/twitch-prefetch-low-latency` — they are frozen
 snapshots referenced from a public upstream issue. The `archive/*` branches and
