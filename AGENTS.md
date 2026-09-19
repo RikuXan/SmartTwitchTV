@@ -344,6 +344,24 @@ feat/pip-vod                    live — continues past what main has, merges fo
 feat/adaptive-buffer-sizing     live — the unbuilt control half of feat/ltb-measurement
 ```
 
+### Landing a live branch as one merge
+
+`main` is a mechanical replay: `master` plus one `--no-ff` merge per branch, in dependency order,
+plus the presence fixup and the docs. Nothing on it is hand-written except those two, so it can be
+rebuilt from the feature branches at any time and the result compared tree-for-tree against the old
+tip.
+
+So when `feat/pip-vod` and `feat/adaptive-buffer-sizing` are finished, do not merge the remainder on
+top. Rebuild `main` from `master` with the finished branches in place and force push it. Each
+feature then enters `main` through exactly one merge commit and `git revert -m 1 <merge>` backs the
+whole thing out.
+
+Rebuild once, after both are done, not once per feature.
+
+Do **not** instead revert the partial merge and re-merge the same branch later: git treats those
+commits as already merged and a later `git merge` silently brings in only the new ones. Reverting
+the revert or rebasing the branch first works, but rebuilding is simpler and leaves no trap.
+
 `feat/ltb-measurement` landed the measuring half of adaptive buffer sizing and none of the control
 half: `TwitchBufferShadow` computes a recommendation that nothing reads, and the conservative-start
 controller does not exist. See "Remaining limits of cushion adaptation" and "September 19
