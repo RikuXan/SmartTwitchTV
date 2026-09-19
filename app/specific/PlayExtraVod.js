@@ -441,6 +441,34 @@ function PlayExtraVod_SwitchToVodMain() {
     }
 }
 
+//Tear the vod down without touching either player, the live stream in the small window keeps playing
+//and the main one is about to be handed a new source by Play_Start
+function PlayExtraVod_ReplaceVodMain() {
+    PlayVod_UpdateHistory(Main_values.Main_Go, true);
+
+    Main_ShowElementWithEle(Play_Controls_Holder);
+    Main_ShowElementWithEle(Play_BottonIcons_Progress_PauseHolder);
+
+    Play_OpenRewind = false;
+    PlayVod_isOn = false;
+    PlayClip_OpenAVod = true;
+    PlayVod_qualities = [];
+    PlayVod_playlist = null;
+
+    Main_clearInterval(PlayVod_SaveOffsetId);
+    Main_clearTimeout(PlayVod_WarnEndId);
+    Main_clearTimeout(PlayClip_CheckIsLiveTimeoutId);
+
+    Chat_Clear();
+
+    PlayExtraVod_Store = PlayExtraVod_NewStore();
+
+    UserLiveFeed_Hide();
+
+    Play_ClearPlayer();
+    PlayVod_ClearVod();
+}
+
 function PlayExtraVod_SwapVolumes() {
     var volume = Play_volumes[0];
 
@@ -470,7 +498,7 @@ function PlayExtraVod_EnterLiveMain() {
     Main_values.Main_selectedChannelDisplayname = Play_data.data[1];
     Main_values.Main_selectedChannelLogo = Play_data.data[9];
 
-    Play_data.watching_time = new Date().getTime();
+    //The stream kept playing in the small window, its watch time did not restart
     Play_DurationSeconds = 28;
     Main_textContentWithEle(Play_BottonIcons_Progress_Duration, Play_timeS(Play_DurationSeconds));
 

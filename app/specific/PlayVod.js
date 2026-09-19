@@ -1012,7 +1012,9 @@ function PlayVod_CheckIfIsLiveStart() {
 }
 
 function PlayVod_OpenLiveStream() {
-    PlayVod_PreshutdownStream(true);
+    if (PlayExtra_PicturePicture) PlayExtraVod_ReplaceVodMain();
+    else PlayVod_PreshutdownStream(true);
+
     Play_OpenFeed(PlayVod_handleKeyDown);
 }
 
