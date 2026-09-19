@@ -15,9 +15,10 @@ Fork-local notes for building this app and deploying it to the Nvidia Shield TV 
 | `.tmp/docker/` | Dockerfiles for the two build images. |
 | `.tmp/logs/twitchll-live.log` | Continuous `TwitchLL` capture written by the `stv-logcat` container. |
 
-Application ids: release is `com.fgl27.twitch.ll`, debug is `com.fgl27.twitch.debug`
-(`applicationId` + `applicationIdSuffix` in `apk/app/build.gradle`). Both install alongside the
-official app.
+Application ids: release is `com.fgl27.twitch`, the same id as the official app, debug is
+`com.fgl27.twitch.debug` (`applicationId` + `applicationIdSuffix` in `apk/app/build.gradle`).
+The release build therefore **replaces** the official app rather than sitting beside it; Android
+refuses to install it over a Play Store copy, so uninstall that first.
 
 ## Files that must stay uncommitted
 
@@ -177,7 +178,7 @@ cd "$R/apk/app/build/outputs/apk"
 docker cp release/app-release-signed.apk stv-logcat:/tmp/
 docker exec stv-logcat bash -c '
 adb install -r /tmp/app-release-signed.apk &&
-adb shell am start -n com.fgl27.twitch.ll/com.fgl27.twitch.PlayerActivity'
+adb shell am start -n com.fgl27.twitch/com.fgl27.twitch.PlayerActivity'
 ```
 
 `adb install -r` stops the running app without restarting it, hence the explicit `am start`. The
@@ -220,7 +221,7 @@ docker exec stv-logcat adb logcat -d -s TwitchLL | grep presence  # points/drops
 ```
 
 Log lines carry the emitting pid. After a deploy the previous process keeps emitting for a few
-seconds, so filter by the newest pid (`adb shell pidof com.fgl27.twitch.ll`) before concluding
+seconds, so filter by the newest pid (`adb shell pidof com.fgl27.twitch`) before concluding
 anything about a fresh build — otherwise you will read the old build's output and think your change
 did nothing.
 
@@ -233,7 +234,7 @@ Build and verification evidence is in `.tmp/file-logging/report.md`.
 `TwitchDiagnosticLog` mirrors every app-side `TwitchLL` diagnostic to logcat and an asynchronous
 file writer. `TwitchDiagnosticFile` stores up to 16 files of 8 MiB each (128 MiB total) under
 `getExternalFilesDir(null)/logs`. The Shield path is
-`/sdcard/Android/data/com.fgl27.twitch.ll/files/logs/`. No extra permission or debuggable build is
+`/sdcard/Android/data/com.fgl27.twitch/files/logs/`. No extra permission or debuggable build is
 needed. Files survive app updates/restarts; clearing app data or uninstalling removes them.
 
 The bounded queue holds 1024 records. File writes and pruning run on one background thread;
