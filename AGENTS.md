@@ -51,10 +51,10 @@ The full extractor test suite includes slow FLAC seek tests under amd64 emulatio
 
 The player is not a dependency, it is compiled from source alongside the app.
 
-`~/Code/github/RikuXan/media` is a clone of `RikuXan/media` (a fork of `fgl27/media`, itself a
-fork of `androidx/media`, base Media3
-**1.8**) on branch `feat/twitch-prefetch-low-latency-dev`, six commits above upstream `4d0e670`.
-Remotes: `origin` = `RikuXan/media` (where work is pushed), `upstream` = `github.com/fgl27/media`.
+`~/Code/github/RikuXan/media` is a clone of `RikuXan/media` — a fork of `fgl27/media`, itself a fork
+of `androidx/media`, base Media3 **1.8**. Build from its `main` branch, which is the repo default and
+carries every merged feature. `release` stays a pristine mirror of upstream `4d0e670`. Remotes:
+`origin` = `RikuXan/media`, `upstream` = `github.com/fgl27/media` (never push there).
 
 It sits beside this repo, which is the layout `apk/settings.gradle` already expects — no local
 modification of that file is needed.
@@ -331,15 +331,16 @@ feat/low-latency-core           the controller, the cushion setting, the speed g
                 └ feat/ltb-measurement  broadcast delay from timed metadata, adaptive recovery
 ```
 
-Media3 fork, on top of `release`:
+Media3 fork. `release` mirrors upstream and never moves; `main` is the default branch and has every
+branch below merged into it except the experiment:
 
 ```
-fix/twitch-emsg-timestamps      prerequisite of feat/ltb-measurement
-exp/audio-pitch-follows-speed   prerequisite of the app side experiment
-feat/delivery-diagnostics       prerequisite of feat/ll-diagnostics
-feat/twitch-prefetch            EXT-X-TWITCH-PREFETCH parsing
- └ feat/hls-low-latency-target  server clock live offset, target tuning
-    └ feat/hls-origin-cushion   cushion from the multivariant playlist
+fix/twitch-emsg-timestamps      merged — prerequisite of feat/ltb-measurement
+feat/delivery-diagnostics       merged — prerequisite of feat/ll-diagnostics
+feat/twitch-prefetch            merged — EXT-X-TWITCH-PREFETCH parsing
+ └ feat/hls-low-latency-target  merged — server clock live offset, target tuning
+    └ feat/hls-origin-cushion   merged — cushion from the multivariant playlist
+exp/audio-pitch-follows-speed   NOT merged — the app side reverted it, mainline would carry dead code
 ```
 
 `integration` in each repo is every branch merged together, and is what gets built and deployed.
