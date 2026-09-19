@@ -287,6 +287,7 @@ public class PlayerActivity extends Activity {
         Handler CheckHandler;
 
         TwitchLivePlaybackSpeedControl SpeedControl;
+        Tools.OriginCushion originCushion = new Tools.OriginCushion();
 
         long ResumePosition;
         long LatencyOffSet;
@@ -401,6 +402,8 @@ public class PlayerActivity extends Activity {
             IsStopped = false;
             AlreadyStarted = true;
             onCreateReady = true;
+
+            new Thread(Tools::ProbeIngestRtts).start();
 
             //int Number_of_Cores = Runtime.getRuntime().availableProcessors();
             //Background threads
@@ -571,6 +574,10 @@ public class PlayerActivity extends Activity {
         TwitchLivePlaybackSpeedControl tempSpeedControl = PlayerObj[PlayerObjPosition].SpeedControl;
         PlayerObj[PlayerObjPosition].SpeedControl = PlayerObj[4].SpeedControl;
         PlayerObj[4].SpeedControl = tempSpeedControl;
+
+        Tools.OriginCushion tempOriginCushion = PlayerObj[PlayerObjPosition].originCushion;
+        PlayerObj[PlayerObjPosition].originCushion = PlayerObj[4].originCushion;
+        PlayerObj[4].originCushion = tempOriginCushion;
 
         PlayerObj[PlayerObjPosition].playerView.setPlayer(PlayerObj[PlayerObjPosition].player);
         PlayerObj[PlayerObjPosition].player.setPlayWhenReady(true);
@@ -1265,6 +1272,8 @@ public class PlayerActivity extends Activity {
                             " target=" + target +
                             " lowLat=" + mLowLatency +
                             " targetMs=" + mLowLatencyTargetMs +
+                            " origin=" + PlayerObj[0].originCushion.code +
+                            " extraMs=" + PlayerObj[0].originCushion.extraMs +
                             " speedAdj=" + speedAdjustment
                         );
                     }
@@ -2777,7 +2786,8 @@ public class PlayerActivity extends Activity {
                     mLowLatencyTargetMs,
                                 speedAdjustment,
                                 mainPlaylistString,
-                                userAgent
+                                userAgent,
+                                PlayerObj[PlayerObjPosition].originCushion
                             );
 
                             SetupPlayer(PlayerObjPosition);
@@ -2820,7 +2830,8 @@ public class PlayerActivity extends Activity {
                     mLowLatencyTargetMs,
                         speedAdjustment,
                         mainPlaylistString,
-                        userAgent
+                        userAgent,
+                        PlayerObj[position].originCushion
                     );
 
                     SetupPlayer(position);
@@ -3135,7 +3146,8 @@ public class PlayerActivity extends Activity {
                     mLowLatencyTargetMs,
                     speedAdjustment,
                     mainPlaylistString,
-                    userAgent
+                    userAgent,
+                    PlayerObj[4].originCushion
                 );
 
                 Set_PlayerObj(
@@ -3183,7 +3195,8 @@ public class PlayerActivity extends Activity {
                     mLowLatencyTargetMs,
                     speedAdjustment,
                     mainPlaylistString,
-                    userAgent
+                    userAgent,
+                    PlayerObj[0].originCushion
                 );
 
                 VideoWebHolder.bringChildToFront(VideoHolder);
@@ -3216,7 +3229,8 @@ public class PlayerActivity extends Activity {
                     mLowLatencyTargetMs,
                     speedAdjustment,
                     mainPlaylistString,
-                    userAgent
+                    userAgent,
+                    PlayerObj[0].originCushion
                 );
 
                 PlayerViewScreensLayout = Tools.BasePreviewLayout(bottom, right, left, web_height, ScreenSize, bigger);
@@ -3530,6 +3544,7 @@ public class PlayerActivity extends Activity {
                 long LiveOffset = 0L;
                 long Duration = 0L;
                 long Position = 0L;
+                long BufferTarget = 0L;
 
                 if (PlayerObj[0].player != null) {
                     buffer = PlayerObj[0].player.getTotalBufferedDuration();
@@ -3538,6 +3553,17 @@ public class PlayerActivity extends Activity {
 
                     //Buffered content already exists, the real latency can never be below it
                     LiveOffset = Math.max(getCurrentLiveOffset(0, Duration, Position), buffer);
+
+                    if (mLowLatency == 1) {
+                        Timeline tl = PlayerObj[0].player.getCurrentTimeline();
+                        if (!tl.isEmpty()) {
+                            tl.getWindow(PlayerObj[0].player.getCurrentMediaItemIndex(), CatchupWindow);
+                            if (CatchupWindow.liveConfiguration != null && CatchupWindow.liveConfiguration.targetOffsetMs != C.TIME_UNSET) {
+                                BufferTarget = CatchupWindow.liveConfiguration.targetOffsetMs +
+                                (PlayerObj[0].SpeedControl != null ? PlayerObj[0].SpeedControl.getStallExtraMs() : 0);
+                            }
+                        }
+                    }
                 }
 
                 getVideoStatusResult = new Gson()
@@ -3554,9 +3580,7 @@ public class PlayerActivity extends Activity {
                             Duration, //8
                             Position, //9
                             PlayerObj[0].SpeedControl != null ? PlayerObj[0].SpeedControl.getAdjustedSpeed() : 1f, //10
-                            mLowLatency == 1 && PlayerObj[0].SpeedControl != null
-                                ? mLowLatencyTargetMs + PlayerObj[0].SpeedControl.getStallExtraMs()
-                                : 0 //11
+                            BufferTarget //11
                         }
                     );
                 //Erase after read
@@ -3657,7 +3681,8 @@ public class PlayerActivity extends Activity {
                     mLowLatencyTargetMs,
                     speedAdjustment,
                     mainPlaylistString,
-                    userAgent
+                    userAgent,
+                    PlayerObj[position].originCushion
                 );
 
                 SetupPlayer(position);
