@@ -417,6 +417,8 @@ function PlayExtraVod_SwitchToVodMain() {
     if (Main_IsOn_OSInterface) OSInterface_mSwitchPlayer();
 
     PlayExtra_data = live;
+    //PlayExtraVod_Side reads this, it has to agree with the players before the mode is handed over
+    PlayExtraVod_InPP = false;
 
     PlayExtraVod_SwapVolumes();
 
@@ -427,8 +429,6 @@ function PlayExtraVod_SwitchToVodMain() {
 
     Main_innerHTML('chat_container_name_text0', STR_SPACE_HTML + PlayExtraVod_Store.channelName + STR_SPACE_HTML);
     Main_innerHTML('chat_container_name_text1', STR_SPACE_HTML + PlayExtra_data.data[1] + STR_SPACE_HTML);
-
-    PlayExtraVod_InPP = false;
 
     if (!Main_values.Play_ChatForceDisable) {
         if (!Play_isFullScreen) {
