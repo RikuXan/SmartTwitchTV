@@ -354,7 +354,7 @@ App repo. Everything below is merged into `main` except the experiment:
 docs/agents-notes               merged — this file
 feat/settings-block-160p        merged — unrelated to low latency, rode along by accident
 feat/presence                   merged — channel points, drops, watch streaks, minute watched
-feat/pip-vod                    merged, STILL LIVE — a VOD in the picture in picture player
+feat/pip-vod                    merged, complete — a VOD in the picture in picture player
 feat/low-latency-core           merged — the controller, the cushion setting, the speed gate
  ├ exp/audio-pitch-follows-speed  NOT merged — evaluated alternative to time stretching, then reverted
  ├ feat/audio-signalsmith         merged — Signalsmith Stretch vendored, JNI bridge, renderer wiring
@@ -370,12 +370,15 @@ feat/low-latency-core           merged — the controller, the cushion setting, 
 the low latency diagnostics do not exist. `main` carries a follow-up commit routing it through
 `TwitchDiagnosticLog` instead — redo that whenever presence is merged forward again.
 
-Two features reached `main` before they were finished, so `main` carries work in progress:
+One branch is still live, so `main` carries work in progress:
 
 ```
-feat/pip-vod                    live — continues past what main has, merges forward when done
 feat/adaptive-buffer-sizing     live — the unbuilt control half of feat/ltb-measurement
 ```
+
+`feat/pip-vod` was finished and `main` was rebuilt on 2026-09-19 so the whole feature arrives in a
+single merge; `git revert -m 1` on that merge backs out all of picture in picture. The pre-rebuild
+tip is `archive/main-before-pip-rebuild-2026-09-19`.
 
 ### Landing a live branch as one merge
 

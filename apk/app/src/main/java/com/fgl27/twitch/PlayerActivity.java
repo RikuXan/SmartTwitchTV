@@ -3789,7 +3789,7 @@ public class PlayerActivity extends Activity {
 
         @JavascriptInterface
         public void PresenceLog(String log) {
-            if (BuildConfig.DEBUG) Log.i("TwitchLL", "presence " + log);
+            if (LL_DIAG) TwitchDiagnosticLog.i("presence " + log);
         }
 
         @JavascriptInterface
