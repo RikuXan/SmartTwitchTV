@@ -290,6 +290,9 @@ function PlayVod_ResumeAfterOnline(forced) {
     if (forced || navigator.onLine || Play_ResumeAfterOnlineCounter > 200) {
         Main_clearInterval(Play_ResumeAfterOnlineId);
         Play_SetControlsVisibility('ShowInStay');
+
+        if (PlayExtra_PicturePicture) PlayExtra_Resume(true);
+
         PlayVod_loadData();
     }
     Play_ResumeAfterOnlineCounter++;
@@ -512,6 +515,8 @@ function PlayVod_shutdownStream(SkipSaveOffset) {
 }
 
 function PlayVod_PreshutdownStream(saveOffset) {
+    if (PlayExtra_PicturePicture) Play_CloseSmall();
+
     PlayVod_UpdateHistory(Main_values.Main_Go, saveOffset);
 
     if (Main_IsOn_OSInterface && !Play_PreviewId) {
@@ -1172,7 +1177,13 @@ function PlayVod_handleKeyDown(e) {
             } else if (Play_isEndDialogVisible()) {
                 Play_EndDialogUpDown(1);
             } else if (UserLiveFeed_isPreviewShowing()) UserLiveFeed_KeyUpDown(1);
-            else if (Play_isFullScreen && !Play_isPanelShowing()) Play_controls[Play_controlsChat].enterKey(2);
+            else if (PlayExtra_PicturePicture) {
+                Main_clearAllPlayerEvents();
+                Main_addEventListener('keyup', Play_handleKeyUp);
+                Play_EndUpclear = false;
+                Play_EndUpclearCalback = PlayVod_handleKeyDown;
+                Play_EndUpclearID = Main_setTimeout(Play_PP_Multi_KeyDownHold, Screens_KeyUptimeout, Play_EndUpclearID);
+            } else if (Play_isFullScreen && !Play_isPanelShowing()) Play_controls[Play_controlsChat].enterKey(2);
             else if (!Play_isVodDialogVisible()) PlayVod_showPanel(true);
             break;
         case KEY_ENTER:
@@ -1200,7 +1211,14 @@ function PlayVod_handleKeyDown(e) {
                 if (UserLiveFeed_DataObj[UserLiveFeed_FeedPosX][UserLiveFeed_FeedPosY[UserLiveFeed_FeedPosX]].image) {
                     UserLiveFeed_OpenBanner();
                 } else if (UserLiveFeed_obj[UserLiveFeed_FeedPosX].IsGame) UserLiveFeed_KeyEnter(UserLiveFeed_FeedPosX);
-                else PlayVod_CheckIfIsLiveStart();
+                else {
+                    Main_clearAllPlayerEvents();
+                    Main_addEventListener('keyup', Play_handleKeyUp);
+                    PlayExtra_clear = false;
+                    UserLiveFeed_ResetFeedId();
+                    Play_EndUpclearCalback = PlayVod_handleKeyDown;
+                    PlayExtra_KeyEnterID = Main_setTimeout(PlayExtra_PPKeyEnter, Screens_KeyUptimeout, PlayExtra_KeyEnterID);
+                }
             } else PlayVod_showPanel(true);
             break;
         case KEY_STOP:
@@ -1246,7 +1264,7 @@ function PlayVod_handleKeyDown(e) {
         case KEY_1:
             if (UserLiveFeed_isPreviewShowing() && (!Play_EndFocus || !Play_isEndDialogVisible())) {
                 if (UserLiveFeed_obj[UserLiveFeed_FeedPosX].IsGame) UserLiveFeed_KeyEnter(UserLiveFeed_FeedPosX);
-                else PlayVod_CheckIfIsLiveStart();
+                else PlayExtra_PPKeyEnter();
             } else PlayVod_NumberKey_QuickJump(e.keyCode);
             break;
         case KEY_2:

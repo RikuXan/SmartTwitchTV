@@ -34,6 +34,8 @@ function Play_screeOn() {
     Settings_ScreenOn();
 }
 
+var Play_ControlsVodPP = ['ShowInVod', 'ShowInPP'];
+
 function Play_SetControlsVisibilityPlayer(PlayVodClip) {
     if (PlayVodClip === 1) {
         if (Play_StayDialogVisible()) Play_SetControlsVisibility('ShowInStay');
@@ -41,9 +43,9 @@ function Play_SetControlsVisibilityPlayer(PlayVodClip) {
         else if (PlayExtra_PicturePicture) Play_SetControlsVisibility('ShowInPP');
         else Play_SetControlsVisibility('ShowInLive');
     } else if (PlayVodClip === 2) {
-        Play_SetControlsVisibility('ShowInVod');
+        Play_SetControlsVisibility(PlayExtra_PicturePicture ? Play_ControlsVodPP : 'ShowInVod');
         if (PlayVod_ChaptersArray.length) Play_BottomShow(Play_controlsChapters);
-        if (Play_HasLive) Play_BottomShow(Play_controlsOpenLive);
+        if (Play_HasLive && !PlayExtra_PicturePicture) Play_BottomShow(Play_controlsOpenLive);
     } else if (PlayVodClip === 3) {
         Play_SetControlsVisibility('ShowInClip');
         if (PlayClip_HasVOD) Play_BottomShow(Play_controlsOpenVod);
@@ -1245,10 +1247,10 @@ function Play_CheckLiveThumb(PreventResetFeed, PreventWarn) {
         var isVodScreen = UserLiveFeed_FeedPosX >= UserLiveFeedobj_UserVodPos;
 
         if ((!Play_isOn && !isVodScreen) || (!PlayVod_isOn && isVodScreen)) {
-            return obj;
-        }
+            if (!Play_PPIsAlredyOpen(obj, isVodScreen)) return obj;
 
-        if (isVodScreen) {
+            error = STR_ALREDY_PLAYING;
+        } else if (isVodScreen) {
             if (!PlayVod_isOn || Main_values.ChannelVod_vodId !== obj[7]) return obj;
 
             error = STR_ALREDY_PLAYING;
@@ -1261,7 +1263,7 @@ function Play_CheckLiveThumb(PreventResetFeed, PreventWarn) {
                     's3_vods'
                 )
             ) {
-                if (Play_MultiEnable || PlayExtra_PicturePicture) error = STR_PP_VOD_ERROR;
+                if (Play_MultiEnable) error = STR_PP_VOD_ERROR;
                 else return obj;
             } else if (Play_MultiEnable) {
                 if (!Play_MultiIsAlredyOPen(obj[14])) return obj;
@@ -1284,6 +1286,14 @@ function Play_CheckLiveThumb(PreventResetFeed, PreventWarn) {
     }
 
     return null;
+}
+
+function Play_PPIsAlredyOpen(obj, isVodScreen) {
+    if (!PlayExtra_PicturePicture) return false;
+
+    if (isVodScreen) return PlayExtraVod_InPP && Main_A_equals_B(PlayExtraVod_Store.vodId, obj[7]);
+
+    return !PlayExtraVod_InPP && Main_A_equals_B(PlayExtra_data.data[14], obj[14]);
 }
 
 function Play_PlayPauseChange(State, PlayVodClip) {
@@ -1547,7 +1557,7 @@ function Play_PP_Multi_KeyDownHold() {
             if (Play_audio_enable[0] && Play_audio_enable[1]) Play_audio_enable[1] = 0;
             else if (!Play_audio_enable[0] && !Play_audio_enable[1]) Play_audio_enable[0] = 1;
 
-            text = Play_audio_enable[0] ? Play_data.data[1] : PlayExtra_data.data[1];
+            text = Play_audio_enable[0] ? PlayExtra_MainName() : PlayExtra_data.data[1];
         } else {
             var i = 0,
                 len = 4;
@@ -1648,7 +1658,11 @@ function Play_handleKeyUp(e) {
     // return;
     if (e.keyCode === KEY_ENTER) {
         Play_handleKeyUpClear();
-        if (!PlayExtra_clear) Play_OpenLiveFeedCheck();
+
+        if (!PlayExtra_clear) {
+            if (PlayVod_isOn) PlayVod_CheckIfIsLiveStart();
+            else Play_OpenLiveFeedCheck();
+        }
     } else if (e.keyCode === KEY_UP) {
         Play_handleKeyUpEndClear();
         if (!Play_EndUpclear) {
@@ -1659,12 +1673,7 @@ function Play_handleKeyUp(e) {
         Play_handleKeyUpEndClear();
         if (!Play_EndUpclear) {
             if (Play_MultiEnable) Play_MultiKeyDown();
-            else {
-                if (Main_IsOn_OSInterface) {
-                    OSInterface_mSwitchPlayer();
-                }
-                PlayExtra_SwitchPlayer();
-            }
+            else PlayExtra_DoSwitch();
         }
     }
 }
@@ -1875,7 +1884,7 @@ function Play_handleKeyDown(e) {
                     Main_addEventListener('keyup', Play_handleKeyUp);
                     PlayExtra_clear = false;
                     UserLiveFeed_ResetFeedId();
-                    PlayExtra_KeyEnterID = Main_setTimeout(PlayExtra_KeyEnter, Screens_KeyUptimeout, PlayExtra_KeyEnterID);
+                    PlayExtra_KeyEnterID = Main_setTimeout(PlayExtra_PPKeyEnter, Screens_KeyUptimeout, PlayExtra_KeyEnterID);
                 }
             } else {
                 Play_showPanel();
@@ -1906,7 +1915,7 @@ function Play_handleKeyDown(e) {
                         if (obj2) Play_MultiSetUpdateDialog(obj2);
                     } else Play_MultiStartPrestart();
                 } else {
-                    PlayExtra_KeyEnter();
+                    PlayExtra_PPKeyEnter();
                 }
             }
             break;
@@ -2655,7 +2664,9 @@ function Play_MakeControls() {
                     }
                 } else if (PlayExtra_PicturePicture) {
                     OSInterface_StartAuto(Play_data.AutoUrl, Play_data.playlist, 1, 0, 0);
-                    OSInterface_StartAuto(PlayExtra_data.AutoUrl, PlayExtra_data.playlist, 1, 0, 1);
+
+                    //Low latency is a live setting, a vod in the small window keeps playing untouched
+                    if (!PlayExtraVod_InPP) OSInterface_StartAuto(PlayExtra_data.AutoUrl, PlayExtra_data.playlist, 1, 0, 1);
                 } else {
                     OSInterface_StartAuto(Play_data.AutoUrl, Play_data.playlist, 1, 0, 0);
                 }
@@ -2739,6 +2750,12 @@ function Play_MakeControls() {
         values: null,
         enterKey: function (shutdown) {
             if (!Main_IsOn_OSInterface || Play_StayDialogVisible()) return;
+
+            //Multistream is live only, the small window would carry its vod into it
+            if (PlayExtraVod_InPP) {
+                Play_showWarningMiddleDialog(STR_PP_VOD_ERROR, 2500);
+                return;
+            }
 
             if (Play_MaxInstances < 4) {
                 Play_showWarningMiddleDialog(STR_4_WAY_MULTI_INSTANCES.replace('%x', Play_MaxInstances) + STR_4_WAY_MULTI, 3000);
@@ -4062,14 +4079,28 @@ function Play_SetControlsArrows(key) {
 }
 
 function Play_SetControlsVisibility(prop) {
+    var props = typeof prop === 'string' ? [prop] : prop;
+
     for (var key in Play_controls) {
-        if (Play_controls[key][prop]) Play_BottomShow(key);
+        if (Play_ControlShowsInAll(key, props)) Play_BottomShow(key);
         else Play_BottomHide(key);
     }
 
     if (!Play_controls[Play_PanelCounter].visible) {
         Play_IconsResetFocus();
     }
+}
+
+//A combined mode passes several props, a control shows only when every one of them wants it
+function Play_ControlShowsInAll(key, props) {
+    var i = 0,
+        len = props.length;
+
+    for (i; i < len; i++) {
+        if (!Play_controls[key][props[i]]) return false;
+    }
+
+    return true;
 }
 
 function Play_KeyChatSizeChage() {
