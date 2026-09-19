@@ -310,26 +310,32 @@ Consequences worth knowing before changing any of it:
 `RikuXan/SmartTwitchTV` is `origin` and the primary workspace. `upstream` is `fgl27/SmartTwitchTV`;
 never push there. The Media3 fork is the same arrangement in `~/Code/github/RikuXan/media`.
 
-The work that used to sit mixed together on `feat/low-latency-improvements-dev` is split into one
-branch per feature. Branches stack where the code genuinely depends on the branch below, so a stack
-must be merged bottom up.
+The work that used to sit mixed together on `feat/low-latency-improvements-dev` was split into one
+branch per feature and merged back into `main`, which is the default branch and what gets built and
+deployed. `master` stays a pristine mirror of upstream. Branches stack where the code genuinely
+depends on the branch below, so a stack merges bottom up.
 
-App repo, on top of `master`:
+App repo. Everything below is merged into `main` except the experiment:
 
 ```
-feat/settings-block-160p        unrelated to low latency, rode along by accident
-feat/presence                   channel points, drops, watch streaks, minute watched
-feat/pip-vod                    a VOD in the picture in picture player next to a live stream
-feat/low-latency-core           the controller, the cushion setting, the speed gate
- ├ exp/audio-pitch-follows-speed  evaluated alternative to time stretching, never merged
- ├ feat/audio-signalsmith         Signalsmith Stretch vendored, JNI bridge, renderer wiring
- └ feat/ll-player-readout         speed and buffer target in the on-screen player info
-    └ feat/ll-origin-cushion      cushion scaled by measured origin RTT
-       └ feat/ll-jitter-window    jitter window arming, stall cushion hold
-          └ feat/ll-speed-glide   slew speed changes so the stretcher stays quiet
-             └ feat/ll-diagnostics   merges feat/audio-signalsmith, persisted logs
-                └ feat/ltb-measurement  broadcast delay from timed metadata, adaptive recovery
+docs/agents-notes               merged — this file
+feat/settings-block-160p        merged — unrelated to low latency, rode along by accident
+feat/presence                   merged — channel points, drops, watch streaks, minute watched
+feat/pip-vod                    merged — a VOD in the picture in picture player next to a live stream
+feat/low-latency-core           merged — the controller, the cushion setting, the speed gate
+ ├ exp/audio-pitch-follows-speed  NOT merged — evaluated alternative to time stretching, then reverted
+ ├ feat/audio-signalsmith         merged — Signalsmith Stretch vendored, JNI bridge, renderer wiring
+ └ feat/ll-player-readout         merged — speed and buffer target in the on-screen player info
+    └ feat/ll-origin-cushion      merged — cushion scaled by measured origin RTT
+       └ feat/ll-jitter-window    merged — jitter window arming, stall cushion hold
+          └ feat/ll-speed-glide   merged — slew speed changes so the stretcher stays quiet
+             └ feat/ll-diagnostics   merged — merges feat/audio-signalsmith, persisted logs
+                └ feat/ltb-measurement  merged — broadcast delay from timed metadata, adaptive recovery
 ```
+
+`feat/presence` gates `PresenceLog` on `BuildConfig.DEBUG` because it branches from `master`, where
+the low latency diagnostics do not exist. `main` carries a follow-up commit routing it through
+`TwitchDiagnosticLog` instead — redo that whenever presence is merged forward again.
 
 Media3 fork. `release` mirrors upstream and never moves; `main` is the default branch and has every
 branch below merged into it except the experiment:
@@ -343,11 +349,9 @@ feat/twitch-prefetch            merged — EXT-X-TWITCH-PREFETCH parsing
 exp/audio-pitch-follows-speed   NOT merged — the app side reverted it, mainline would carry dead code
 ```
 
-`integration` in each repo is every branch merged together, and is what gets built and deployed.
-When it was created it reproduced the pre-split tree exactly, `git diff archive/ll-dev-2026-09-19
-integration` showing only one doc comment moved back onto its own function. It has since gained
-`feat/pip-vod`, so that diff is no longer the losslessness check — compare a feature branch against
-its own `archive/*` ancestor instead.
+Every merge into `main` is a `--no-ff` merge commit, so any single feature can be reverted on its
+own. The feature branches are kept after merging; delete one only once its work is certainly not
+needed as a base again.
 
 Never move `feat/low-latency-improvements` or `feat/twitch-prefetch-low-latency` — they are frozen
 snapshots referenced from a public upstream issue. The `archive/*` branches and
