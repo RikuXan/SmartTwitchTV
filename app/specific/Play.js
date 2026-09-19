@@ -2112,7 +2112,6 @@ function Play_OpenFeed(keyfun) {
             return;
         }
 
-        //While the small window is up the feed fills it, the main player keeps what it has
         if (PlayExtra_PicturePicture) {
             PlayExtraVod_KeyEnter();
             return;

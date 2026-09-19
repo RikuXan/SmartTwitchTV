@@ -18,11 +18,8 @@
  *
  */
 
-//A VOD and a live stream playing together in picture in picture.
-//Only one VOD plays at a time, the vod state (PlayVod_*, ChannelVod_*, Main_values.ChannelVod_*)
-//is a singleton, so it describes the vod while it sits in the main player and
-//PlayExtraVod_Store holds it while it sits in the small one.
-
+//Only one vod plays at a time: PlayVod_*/ChannelVod_* always describe the vod in the main player,
+//PlayExtraVod_Store describes it while it sits in the small one
 var PlayExtraVod_InPP = false;
 var PlayExtraVod_LoadId = 0;
 
@@ -49,7 +46,6 @@ function PlayExtraVod_NewStore() {
 
 var PlayExtraVod_Store = PlayExtraVod_NewStore();
 
-//The small player holds a vod, or the main one does while picture in picture is on
 function PlayExtraVod_IsMixed() {
     return PlayExtra_PicturePicture && (PlayExtraVod_InPP || PlayVod_isOn);
 }
@@ -81,7 +77,7 @@ function PlayExtraVod_StoreFromMain() {
     store.channelId = Main_values.Main_selectedChannel_id;
     store.channelLogin = Main_values.Main_selectedChannel;
     store.channelName = Main_values.Main_selectedChannelDisplayname;
-    store.channelLogo = Main_values.Main_selectedChannelLogo;
+    //Main_selectedChannelLogo holds vod cell index 15, the duration, never a logo
     store.channelPartner = Main_values.Main_selectedChannelPartner;
     store.title = ChannelVod_title;
     store.game = ChannelVod_game;
@@ -96,10 +92,14 @@ function PlayExtraVod_StoreFromMain() {
     return store;
 }
 
-//The focused feed cell decides what the small window gets, a vod row holds vods, every other row lives
 function PlayExtra_PPKeyEnter() {
     if (UserLiveFeed_FeedPosX >= UserLiveFeedobj_UserVodPos) PlayExtraVod_KeyEnter();
     else PlayExtra_KeyEnter();
+}
+
+//Play_data keeps the last live stream while a vod plays, so it cannot name the main player
+function PlayExtra_MainName() {
+    return PlayVod_isOn ? Main_values.Main_selectedChannelDisplayname : Play_data.data[1];
 }
 
 function PlayExtra_DoSwitch() {
@@ -114,7 +114,6 @@ function PlayExtra_DoSwitch() {
     PlayExtra_SwitchPlayer();
 }
 
-//Start a vod in the small player, the main one keeps the live stream it has
 function PlayExtraVod_KeyEnter() {
     PlayExtra_clear = true;
 
@@ -223,7 +222,6 @@ function PlayExtraVod_Fail(reason) {
     Play_showWarningMiddleDialog(reason, 2500);
 }
 
-//Picture in picture is going away, keep the watched position of a vod that was in the small window
 function PlayExtraVod_ClearPP() {
     if (PlayExtraVod_InPP) PlayExtraVod_SaveOffset();
 
@@ -253,7 +251,6 @@ function PlayExtraVod_End(doSwitch, fail_type) {
     Play_CloseSmall();
 }
 
-//The vod side of the picture in picture info panel, vod cells carry different fields than live ones
 function PlayExtraVod_UpdatePanelSide(pp) {
     var store = PlayExtraVod_Store;
 
@@ -323,12 +320,14 @@ function PlayExtraVod_SaveOffset() {
 
     var time = parseInt(OSInterface_gettimePP() / 1000);
 
+    //The bridged position lags a switch by up to half a second and still reports the other player
+    if (time < 1 || time >= PlayExtraVod_Store.durationSeconds) time = PlayExtraVod_Store.position;
+
     if (time > 0 && PlayExtraVod_Store.durationSeconds - 300 > time) {
         Main_history_UpdateVodClip(PlayExtraVod_Store.vodId, time, 'vod');
     }
 }
 
-//Coming back from the background, the playlist token is stale, fetch a fresh one and resume where it stopped
 function PlayExtraVod_Resume() {
     var saved = parseInt(OSInterface_getsavedtimePP() / 1000);
 
@@ -343,7 +342,6 @@ function PlayExtraVod_HideSmallChat() {
     PlayExtra_HideChat();
 }
 
-//Move the vod between the main and the small player without restarting either playback
 function PlayExtraVod_Switch() {
     if (PlayVod_isOn) PlayExtraVod_SwitchToLiveMain();
     else PlayExtraVod_SwitchToVodMain();
@@ -404,10 +402,12 @@ function PlayExtraVod_SwitchToVodMain() {
 
     PlayExtraVod_InPP = false;
 
-    if (!Play_isFullScreen) PlayExtra_ShowChat();
-
     if (!Main_values.Play_ChatForceDisable) {
-        ChatLive_Init(1);
+        if (!Play_isFullScreen) {
+            PlayExtra_ShowChat();
+            ChatLive_Init(1);
+        }
+
         Chat_offset = PlayExtraVod_Store.position;
         Chat_Init();
     }
@@ -420,7 +420,6 @@ function PlayExtraVod_SwapVolumes() {
     Play_volumes[1] = volume;
 }
 
-//The main player now holds the live stream, hand the player screen over to the live mode
 function PlayExtraVod_EnterLiveMain() {
     Main_clearInterval(PlayVod_SaveOffsetId);
     Main_clearInterval(PlayVod_RefreshProgressBarrID);
@@ -458,7 +457,6 @@ function PlayExtraVod_EnterLiveMain() {
     Play_updateStreamInfo();
 }
 
-//The main player now holds the vod, hand the player screen over to the vod mode
 function PlayExtraVod_EnterVodMain() {
     var store = PlayExtraVod_Store;
 
@@ -469,8 +467,9 @@ function PlayExtraVod_EnterVodMain() {
     Main_values.Main_selectedChannel = store.channelLogin;
     Main_values.Main_selectedChannel_id = store.channelId;
     Main_values.Main_selectedChannelDisplayname = store.channelName;
-    Main_values.Main_selectedChannelLogo = store.channelLogo;
     Main_values.Main_selectedChannelPartner = store.channelPartner;
+
+    if (store.channelLogo) Main_values.Main_selectedChannelLogo = store.channelLogo;
 
     ChannelVod_createdAt = store.createdAt;
     ChannelVod_views = store.views;
