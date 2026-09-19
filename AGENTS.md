@@ -13,7 +13,7 @@ Fork-local notes for building this app and deploying it to the Nvidia Shield TV 
 | `apk/app/src/main/cpp/` | Signalsmith Stretch JNI bridge (needs the NDK). |
 | `../media` (`~/Code/github/RikuXan/media`) | The patched Media3/ExoPlayer fork this build links against, a sibling checkout. |
 | `.tmp/docker/` | Dockerfiles for the two build images. |
-| `.tmp/logs/twitchll-live.log` | Continuous `TwitchLL` capture written by the `stv-logcat` container. |
+| `.tmp/logs/twitchll-live.log` | Continuous `TwitchLL` capture. The running `stv-logcat` container mounts this path **from the `fgl27` clone**, not from here — `docker inspect stv-logcat` names the source it actually writes to. |
 
 Application ids: release is `com.fgl27.twitch`, the same id as the official app, debug is
 `com.fgl27.twitch.debug` (`applicationId` + `applicationIdSuffix` in `apk/app/build.gradle`).
@@ -203,6 +203,9 @@ while true; do
   sleep 5
 done'
 ```
+
+The device ring buffer holds only a few seconds of `TwitchLL`, which is far too little to read
+back a reproduction. Always read the captured file, never `adb logcat -d`.
 
 ### The capture can die silently
 
