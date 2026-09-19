@@ -11,7 +11,7 @@ Fork-local notes for building this app and deploying it to the Nvidia Shield TV 
 | `apk/` | The Android wrapper (Java, Gradle). |
 | `apk/app/src/main/assets/app/` | **Build input only** — a copy of `app/`, gitignored. |
 | `apk/app/src/main/cpp/` | Signalsmith Stretch JNI bridge (needs the NDK). |
-| `../media` (`~/Code/github/fgl27/media`) | The patched Media3/ExoPlayer fork this build links against, a sibling checkout. |
+| `../media` (`~/Code/github/RikuXan/media`) | The patched Media3/ExoPlayer fork this build links against, a sibling checkout. |
 | `.tmp/docker/` | Dockerfiles for the two build images. |
 | `.tmp/logs/twitchll-live.log` | Continuous `TwitchLL` capture written by the `stv-logcat` container. |
 
@@ -51,9 +51,10 @@ The full extractor test suite includes slow FLAC seek tests under amd64 emulatio
 
 The player is not a dependency, it is compiled from source alongside the app.
 
-`~/Code/github/fgl27/media` is a clone of `fgl27/media` (a fork of `androidx/media`, base Media3
+`~/Code/github/RikuXan/media` is a clone of `RikuXan/media` (a fork of `fgl27/media`, itself a
+fork of `androidx/media`, base Media3
 **1.8**) on branch `feat/twitch-prefetch-low-latency-dev`, six commits above upstream `4d0e670`.
-Remotes: `origin` = `github.com/fgl27/media`, `fork` = `RikuXan/media` (where the branch is pushed).
+Remotes: `origin` = `RikuXan/media` (where work is pushed), `upstream` = `github.com/fgl27/media`.
 
 It sits beside this repo, which is the layout `apk/settings.gradle` already expects — no local
 modification of that file is needed.
@@ -110,10 +111,10 @@ Two images, both amd64 under Podman-backed Docker:
   (`.tmp/docker/Dockerfile.ndk`). **Required**, because `apk/app/src/main/cpp` is part of the build.
 
 ```bash
-R=/Users/philipp.holler/Code/github/fgl27/SmartTwitchTV
+R=/Users/philipp.holler/Code/github/RikuXan/SmartTwitchTV
 docker rm -f stv-build 2>/dev/null
 docker run -d --name stv-build \
-  -v /Users/philipp.holler/Code/github/fgl27:/work \
+  -v /Users/philipp.holler/Code/github/RikuXan:/work \
   -v stv-gradle-cache:/root/.gradle \
   -v stv-android-config:/root/.android \
   -w /work/SmartTwitchTV/apk stv-android-build-ndk ./gradlew assembleRelease --no-daemon
@@ -252,13 +253,49 @@ cannot recover hours after the fact. File capture does not need the Mac or ADB c
 
 ## Branches
 
-- `feat/low-latency-improvements-dev` on remote `fork` (`RikuXan/SmartTwitchTV`) is where work
-  lands. `origin` is upstream `fgl27/SmartTwitchTV`; never push there.
-- Never push to `feat/low-latency-improvements` or `feat/twitch-prefetch-low-latency` — those are
-  frozen snapshots referenced from a public upstream issue.
-- The Media3 fork is its own repo with its own remote and branch
-  (`feat/twitch-prefetch-low-latency-dev` on `RikuXan/media`). Changing player internals means
-  committing there as well, and the APK build picks it up through `mediaRoot`.
+`RikuXan/SmartTwitchTV` is `origin` and the primary workspace. `upstream` is `fgl27/SmartTwitchTV`;
+never push there. The Media3 fork is the same arrangement in `~/Code/github/RikuXan/media`.
+
+The work that used to sit mixed together on `feat/low-latency-improvements-dev` is split into one
+branch per feature. Branches stack where the code genuinely depends on the branch below, so a stack
+must be merged bottom up.
+
+App repo, on top of `master`:
+
+```
+feat/settings-block-160p        unrelated to low latency, rode along by accident
+feat/presence                   channel points, drops, watch streaks, minute watched
+feat/pip-vod                    a VOD in the picture in picture player next to a live stream
+feat/low-latency-core           the controller, the cushion setting, the speed gate
+ ├ exp/audio-pitch-follows-speed  evaluated alternative to time stretching, never merged
+ ├ feat/audio-signalsmith         Signalsmith Stretch vendored, JNI bridge, renderer wiring
+ └ feat/ll-player-readout         speed and buffer target in the on-screen player info
+    └ feat/ll-origin-cushion      cushion scaled by measured origin RTT
+       └ feat/ll-jitter-window    jitter window arming, stall cushion hold
+          └ feat/ll-speed-glide   slew speed changes so the stretcher stays quiet
+             └ feat/ll-diagnostics   merges feat/audio-signalsmith, persisted logs
+                └ feat/ltb-measurement  broadcast delay from timed metadata, adaptive recovery
+```
+
+Media3 fork, on top of `release`:
+
+```
+fix/twitch-emsg-timestamps      prerequisite of feat/ltb-measurement
+exp/audio-pitch-follows-speed   prerequisite of the app side experiment
+feat/delivery-diagnostics       prerequisite of feat/ll-diagnostics
+feat/twitch-prefetch            EXT-X-TWITCH-PREFETCH parsing
+ └ feat/hls-low-latency-target  server clock live offset, target tuning
+    └ feat/hls-origin-cushion   cushion from the multivariant playlist
+```
+
+`integration` in each repo is every branch merged together. It is what gets built and deployed, and
+it reproduces the pre-split tree exactly — `git diff archive/ll-dev-2026-09-19 integration` is empty
+but for one doc comment moved back onto its own function. Re-run that diff after changing a feature
+branch to prove nothing was dropped.
+
+Never move `feat/low-latency-improvements` or `feat/twitch-prefetch-low-latency` — they are frozen
+snapshots referenced from a public upstream issue. The `archive/*` branches and
+`origin/wip/pip-vod-live` are the pre-split state, kept for reference.
 
 ## Full cycle
 
