@@ -321,7 +321,7 @@ App repo. Everything below is merged into `main` except the experiment:
 docs/agents-notes               merged — this file
 feat/settings-block-160p        merged — unrelated to low latency, rode along by accident
 feat/presence                   merged — channel points, drops, watch streaks, minute watched
-feat/pip-vod                    merged — a VOD in the picture in picture player next to a live stream
+feat/pip-vod                    merged, STILL LIVE — a VOD in the picture in picture player
 feat/low-latency-core           merged — the controller, the cushion setting, the speed gate
  ├ exp/audio-pitch-follows-speed  NOT merged — evaluated alternative to time stretching, then reverted
  ├ feat/audio-signalsmith         merged — Signalsmith Stretch vendored, JNI bridge, renderer wiring
@@ -336,6 +336,20 @@ feat/low-latency-core           merged — the controller, the cushion setting, 
 `feat/presence` gates `PresenceLog` on `BuildConfig.DEBUG` because it branches from `master`, where
 the low latency diagnostics do not exist. `main` carries a follow-up commit routing it through
 `TwitchDiagnosticLog` instead — redo that whenever presence is merged forward again.
+
+Two features reached `main` before they were finished, so `main` carries work in progress:
+
+```
+feat/pip-vod                    live — continues past what main has, merges forward when done
+feat/adaptive-buffer-sizing     live — the unbuilt control half of feat/ltb-measurement
+```
+
+`feat/ltb-measurement` landed the measuring half of adaptive buffer sizing and none of the control
+half: `TwitchBufferShadow` computes a recommendation that nothing reads, and the conservative-start
+controller does not exist. See "Remaining limits of cushion adaptation" and "September 19
+measurement and recovery state" below for exactly what is and is not established. That work
+continues on `feat/adaptive-buffer-sizing`, branched from `main` rather than from
+`feat/ltb-measurement` because `main` already contains all of it.
 
 Media3 fork. `release` mirrors upstream and never moves; `main` is the default branch and has every
 branch below merged into it except the experiment:
