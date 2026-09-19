@@ -1658,11 +1658,8 @@ function Play_RefreshWatchingTime() {
             }
         }
     } else if (PlayExtra_PicturePicture) {
-        Main_textContentWithEle(Play_infoPPWatchingTime[0], STR_WATCHING + Play_timeMs(dateNow - Play_data.watching_time));
-        Main_textContentWithEle(Play_infoPPLiveTime[0], Play_GetLiveTime(dateNow, Play_data.data[12], Play_data.watching_time));
-
-        Main_textContentWithEle(Play_infoPPWatchingTime[1], STR_WATCHING + Play_timeMs(dateNow - PlayExtra_data.watching_time));
-        Main_textContentWithEle(Play_infoPPLiveTime[1], Play_GetLiveTime(dateNow, PlayExtra_data.data[12], Play_data.watching_time));
+        PlayExtra_RefreshPPTimes(0, dateNow);
+        PlayExtra_RefreshPPTimes(1, dateNow);
     } else if (Play_StayDialogVisible()) {
         Main_textContentWithEle(Play_infoLiveTime, STR_WAITING + Play_timeMs(dateNow - Play_data.watching_time));
         Main_textContentWithEle(Play_infoWatchingTime, '');
