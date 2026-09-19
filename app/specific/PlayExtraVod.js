@@ -296,7 +296,7 @@ function PlayExtraVod_RefreshTimes(pp, dateNow) {
 function PlayExtraVod_UpdateLogo(pp) {
     var store = PlayExtraVod_Store;
 
-    var div = Play_partnerIcon(store.channelName, store.channelPartner, 0, store.language ? '[' + store.language.toUpperCase() + ']' : '');
+    var div = Play_partnerIcon(store.channelName, store.channelPartner, 1, store.language ? '[' + store.language.toUpperCase() + ']' : '');
 
     if (updateLogoPPDiv[pp] !== div) {
         Main_innerHTML('stream_info_pp_name' + pp, div);
