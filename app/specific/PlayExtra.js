@@ -316,17 +316,30 @@ var updateLogoPPDiv = [];
 var updateLogoPPLogo = [];
 
 function PlayExtra_UpdatePanel() {
-    if (PlayExtraVod_IsMixed()) {
-        var vodSide = PlayExtraVod_InPP ? 1 : 0;
+    var vodSide = PlayExtraVod_Side();
 
-        PlayExtraVod_UpdatePanelSide(vodSide);
-        PlayExtra_UpdatePanelLive(vodSide ? 0 : 1);
+    for (var pp = 0; pp < 2; pp++) {
+        if (pp === vodSide) PlayExtraVod_UpdatePanelSide(pp);
+        else PlayExtra_UpdatePanelLive(pp);
+    }
+}
+
+function PlayExtra_RefreshPPTimes(pp, dateNow) {
+    if (pp === PlayExtraVod_Side()) {
+        PlayExtraVod_RefreshTimes(pp, dateNow);
 
         return;
     }
 
-    PlayExtra_UpdatePanelLive(0);
-    PlayExtra_UpdatePanelLive(1);
+    var obj = !pp ? Play_data : PlayExtra_data;
+
+    //An unset watching_time renders as the whole unix epoch rather than a duration
+    Main_textContentWithEle(Play_infoPPWatchingTime[pp], obj.watching_time ? STR_WATCHING + Play_timeMs(dateNow - obj.watching_time) : '');
+
+    Main_textContentWithEle(
+        Play_infoPPLiveTime[pp],
+        obj.data[12] || obj.watching_time ? Play_GetLiveTime(dateNow, obj.data[12], obj.watching_time) : ''
+    );
 }
 
 function PlayExtra_UpdatePanelLive(pp) {

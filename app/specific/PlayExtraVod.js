@@ -32,6 +32,7 @@ function PlayExtraVod_NewStore() {
         channelName: '',
         channelLogo: '',
         logoId: 0,
+        watchingTime: 0,
         channelPartner: null,
         title: '',
         game: '',
@@ -51,6 +52,12 @@ function PlayExtraVod_IsMixed() {
     return PlayExtra_PicturePicture && (PlayExtraVod_InPP || PlayVod_isOn);
 }
 
+function PlayExtraVod_Side() {
+    if (!PlayExtraVod_IsMixed()) return -1;
+
+    return PlayExtraVod_InPP ? 1 : 0;
+}
+
 function PlayExtraVod_StoreFromCell(cell, position) {
     var store = PlayExtraVod_NewStore();
 
@@ -66,29 +73,33 @@ function PlayExtraVod_StoreFromCell(cell, position) {
     store.views = cell[4];
     store.durationSeconds = parseInt(cell[15]);
     store.position = position;
+    store.watchingTime = new Date().getTime();
 
     return store;
 }
 
 function PlayExtraVod_StoreFromMain() {
-    var store = PlayExtraVod_NewStore();
+    //The ChannelVod_* globals are only filled by Main_OpenVodStart, the cell is always there
+    var store = PlayExtraVod_StoreFromCell(Main_Slice(Main_values_Play_data), parseInt(OSInterface_gettime() / 1000));
 
-    store.data = Main_Slice(Main_values_Play_data);
     store.vodId = Main_values.ChannelVod_vodId;
     store.channelId = Main_values.Main_selectedChannel_id;
     store.channelLogin = Main_values.Main_selectedChannel;
     store.channelName = Main_values.Main_selectedChannelDisplayname;
     //Main_selectedChannelLogo holds vod cell index 15, the duration, never a logo
     store.channelPartner = Main_values.Main_selectedChannelPartner;
-    store.title = ChannelVod_title;
-    store.game = ChannelVod_game;
-    store.language = ChannelVod_language;
-    store.createdAt = ChannelVod_createdAt;
-    store.views = ChannelVod_views;
     store.durationSeconds = Play_DurationSeconds;
     store.autoUrl = PlayVod_autoUrl;
     store.playlist = PlayVod_playlist;
-    store.position = parseInt(OSInterface_gettime() / 1000);
+
+    if (ChannelVod_title) store.title = ChannelVod_title;
+    if (ChannelVod_language) store.language = ChannelVod_language;
+    if (ChannelVod_createdAt) store.createdAt = ChannelVod_createdAt;
+    if (ChannelVod_views) store.views = ChannelVod_views;
+
+    if (Main_A_equals_B(PlayExtraVod_Store.vodId, store.vodId) && PlayExtraVod_Store.watchingTime) {
+        store.watchingTime = PlayExtraVod_Store.watchingTime;
+    }
 
     return store;
 }
@@ -269,9 +280,17 @@ function PlayExtraVod_UpdatePanelSide(pp) {
     streamGamePP[pp] = store.game;
 
     if (streamViewersPP[pp] !== store.views) {
-        Main_innerHTML('stream_info_pp_viewers' + pp, store.createdAt + ',' + STR_SPACE_HTML + store.views + ',');
+        Main_innerHTML('stream_info_pp_viewers' + pp, !store.views ? STR_SPACE_HTML : store.views + STR_SPACE_HTML + STR_VIEWS + ',');
     }
     streamViewersPP[pp] = store.views;
+}
+
+function PlayExtraVod_RefreshTimes(pp, dateNow) {
+    var store = PlayExtraVod_Store;
+
+    Main_textContentWithEle(Play_infoPPLiveTime[pp], store.createdAt);
+
+    Main_textContentWithEle(Play_infoPPWatchingTime[pp], store.watchingTime ? STR_WATCHING + Play_timeMs(dateNow - store.watchingTime) : '');
 }
 
 function PlayExtraVod_UpdateLogo(pp) {
@@ -371,6 +390,7 @@ function PlayExtraVod_SwitchToLiveMain() {
     Play_data = live;
     PlayExtra_data = JSON.parse(JSON.stringify(Play_data_base));
     PlayExtra_data.data = Main_Slice(store.data);
+    PlayExtra_data.watching_time = store.watchingTime;
 
     PlayExtraVod_Store = store;
     PlayExtraVod_InPP = true;
@@ -456,6 +476,9 @@ function PlayExtraVod_EnterLiveMain() {
 
     Main_values.Play_WasPlaying = 1;
 
+    Play_controls[Play_controlsChanelCont].setLabel(Play_data.data[1]);
+    Play_controls[Play_controlsGameCont].setLabel(Play_data.data[3]);
+
     Main_PlayHandleKeyDown();
     Play_EndSet(1);
     Play_CheckFollow(Play_data.data[14]);
@@ -482,7 +505,7 @@ function PlayExtraVod_EnterVodMain() {
     ChannelVod_createdAt = store.createdAt;
     ChannelVod_views = store.views;
     ChannelVod_title = store.title;
-    ChannelVod_game = store.game;
+    ChannelVod_game = store.game ? STR_STARTED + STR_PLAYING + store.game : '';
     ChannelVod_language = store.language;
 
     PlayVod_autoUrl = store.autoUrl;
@@ -517,6 +540,9 @@ function PlayExtraVod_EnterVodMain() {
     PlayVod_SaveOffsetId = Main_setInterval(PlayVod_SaveOffset, 60000, PlayVod_SaveOffsetId);
 
     Main_values.Play_WasPlaying = 2;
+
+    Play_controls[Play_controlsChanelCont].setLabel(store.channelName);
+    Play_controls[Play_controlsGameCont].setLabel(store.game);
 
     Main_PlayVodHandleKeyDown();
     Play_EndSet(2);
