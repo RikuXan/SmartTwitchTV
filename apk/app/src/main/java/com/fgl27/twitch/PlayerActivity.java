@@ -72,12 +72,12 @@ import androidx.media3.common.Format;
 import androidx.media3.common.PlaybackException;
 import androidx.media3.common.PlaybackParameters;
 import androidx.media3.common.Player;
+import androidx.media3.common.Timeline;
 import androidx.media3.common.TrackGroup;
 import androidx.media3.common.TrackSelectionOverride;
 import androidx.media3.common.TrackSelectionParameters;
 import androidx.media3.common.Tracks;
 import androidx.media3.common.util.Util;
-import androidx.media3.exoplayer.DefaultLivePlaybackSpeedControl;
 import androidx.media3.exoplayer.DefaultRenderersFactory;
 import androidx.media3.exoplayer.ExoPlayer;
 import androidx.media3.exoplayer.analytics.AnalyticsListener;
@@ -188,7 +188,10 @@ public class PlayerActivity extends Activity {
     private long SpeedCounter = 0L;
     private int mLowLatency = 0;
     private int mLowLatencyVod = 7;
+    private int mLowLatencyTargetMs = 1000;
+    private float mUserPlaybackSpeed = 1f;
     private boolean speedAdjustment = false;
+    private final Timeline.Window CatchupWindow = new Timeline.Window();
     private boolean AlreadyStarted;
     private boolean onCreateReady;
     private boolean IsStopped;
@@ -282,6 +285,8 @@ public class PlayerActivity extends Activity {
         float volume;
 
         Handler CheckHandler;
+
+        TwitchLivePlaybackSpeedControl SpeedControl;
 
         long ResumePosition;
         long LatencyOffSet;
@@ -562,6 +567,11 @@ public class PlayerActivity extends Activity {
         PlayerObj[PlayerObjPosition].player = PlayerObj[4].player;
         PlayerObj[4].player = tempPlayer;
 
+        //The controller belongs to the ExoPlayer instance, it must travel with the player swap
+        TwitchLivePlaybackSpeedControl tempSpeedControl = PlayerObj[PlayerObjPosition].SpeedControl;
+        PlayerObj[PlayerObjPosition].SpeedControl = PlayerObj[4].SpeedControl;
+        PlayerObj[4].SpeedControl = tempSpeedControl;
+
         PlayerObj[PlayerObjPosition].playerView.setPlayer(PlayerObj[PlayerObjPosition].player);
         PlayerObj[PlayerObjPosition].player.setPlayWhenReady(true);
 
@@ -625,7 +635,7 @@ public class PlayerActivity extends Activity {
                     )
                 )
                 .setLivePlaybackSpeedControl(
-                    new DefaultLivePlaybackSpeedControl.Builder().setFallbackMaxPlaybackSpeed(1.0f).setFallbackMinPlaybackSpeed(1.0f).build()
+                    PlayerObj[PlayerObjPosition].SpeedControl = new TwitchLivePlaybackSpeedControl()
                 )
                 .build();
 
@@ -850,23 +860,18 @@ public class PlayerActivity extends Activity {
         long LiveOffset = PlayerObj[PlayerObjPosition].player.getCurrentLiveOffset();
         long Offset = Duration - Position;
 
-        if (PlayerObj[PlayerObjPosition].LatencyOffSet == 0 && Offset > 0 && LiveOffset > (Offset + 3000)) { // 3000 minor extra offset as some streams LiveOffset maybe very close to Offset
-            PlayerObj[PlayerObjPosition].LatencyOffSet = LiveOffset - Offset;
-            //            Log.d("TAG1", "Duration " + Duration);
-            //            Log.d("TAG1", "Position " + Position);
-            //            Log.d("TAG1", "LiveOffset " + LiveOffset);
-            //            Log.d("TAG1", "LatencyOffSet " + PlayerObj[PlayerObjPosition].LatencyOffSet);
-            //            Log.d("TAG1", "LiveOffset " + (LiveOffset - PlayerObj[PlayerObjPosition].LatencyOffSet));
+        if (Offset <= 0) return Math.max(LiveOffset, 0);
 
+        long Corrected = LiveOffset - PlayerObj[PlayerObjPosition].LatencyOffSet;
+
+        //The real latency is always at least the distance to the window edge, below it the correction is stale
+        //10000 as anything that far over the window edge distance is beyond a real encode/CDN pipeline delay
+        if (Corrected < Offset || (PlayerObj[PlayerObjPosition].LatencyOffSet == 0 && LiveOffset > (Offset + 10000))) {
+            PlayerObj[PlayerObjPosition].LatencyOffSet = LiveOffset > (Offset + 10000) ? LiveOffset - Offset : 0;
+            Corrected = LiveOffset - PlayerObj[PlayerObjPosition].LatencyOffSet;
         }
 
-        LiveOffset -= PlayerObj[0].LatencyOffSet;
-
-        if (LiveOffset < 0) {
-            PlayerObj[0].LatencyOffSet = 0;
-        }
-
-        return LiveOffset;
+        return Math.max(Corrected, 0);
     }
 
     //Basic player position setting, for resume playback
@@ -1237,10 +1242,52 @@ public class PlayerActivity extends Activity {
                     PlayerCurrentPosition = PlayerObj[0].player != null ? PlayerObj[0].player.getCurrentPosition() : 0L;
                     PPPlayerCurrentPosition = PlayerObj[1].player != null ? PlayerObj[1].player.getCurrentPosition() : 0L;
 
+                    if (BuildConfig.DEBUG && PlayerObj[0].player != null && PlayerObj[0].Type == 1) {
+                        long dur = PlayerObj[0].player.getDuration();
+                        long pos = PlayerObj[0].player.getCurrentPosition();
+                        Timeline tl = PlayerObj[0].player.getCurrentTimeline();
+                        long target = -1;
+                        if (!tl.isEmpty()) {
+                            tl.getWindow(PlayerObj[0].player.getCurrentMediaItemIndex(), CatchupWindow);
+                            if (CatchupWindow.liveConfiguration != null) target = CatchupWindow.liveConfiguration.targetOffsetMs;
+                        }
+                        Log.i(
+                            "TwitchLL",
+                            "raw=" + PlayerObj[0].player.getCurrentLiveOffset() +
+                            " shown=" + getCurrentLiveOffset(0, dur, pos) +
+                            " edgeDist=" + (dur - pos) +
+                            " buf=" + PlayerObj[0].player.getTotalBufferedDuration() +
+                            " pp=" + PlayerObj[0].player.getPlaybackParameters().speed +
+                            " pos=" + pos +
+                            " ctlMin=" + (PlayerObj[0].SpeedControl != null ? PlayerObj[0].SpeedControl.getWindowedMinMs() : -1) +
+                            " ctlStallX=" + (PlayerObj[0].SpeedControl != null ? PlayerObj[0].SpeedControl.getStallExtraMs() : -1) +
+                            " ctlSpeed=" + (PlayerObj[0].SpeedControl != null ? PlayerObj[0].SpeedControl.getAdjustedSpeed() : -1) +
+                            " target=" + target +
+                            " lowLat=" + mLowLatency +
+                            " targetMs=" + mLowLatencyTargetMs +
+                            " speedAdj=" + speedAdjustment
+                        );
+                    }
+
+                    LiveSpeedGateCheck();
                     GetCurrentPosition();
                 },
                 CurrentPositionTimeout
             );
+    }
+
+    //The media clock can echo the adjusted speed back into the user playback parameters, which
+    //permanently disables that player's live speed gate (it requires user speed == 1f), reset it.
+    //Covers all players so PiP and multi stream ones recover too, live only, VODs may use user speeds.
+    //Only while the user chosen speed is 1f, a manual speed must not be fought
+    private void LiveSpeedGateCheck() {
+        if (!speedAdjustment || mLowLatency == 0 || mUserPlaybackSpeed != 1f) return;
+
+        for (PlayerObj obj : PlayerObj) {
+            if (obj != null && obj.player != null && obj.Type == 1 && obj.player.getPlaybackParameters().speed != 1f) {
+                obj.player.setPlaybackParameters(PlaybackParameters.DEFAULT);
+            }
+        }
     }
 
     private void GetCurrentPositionSmall() {
@@ -2727,6 +2774,7 @@ public class PlayerActivity extends Activity {
                                 mWebViewContext,
                                 Type,
                                 getLowLatency(Type),
+                    mLowLatencyTargetMs,
                                 speedAdjustment,
                                 mainPlaylistString,
                                 userAgent
@@ -2769,6 +2817,7 @@ public class PlayerActivity extends Activity {
                         mWebViewContext,
                         Type,
                         getLowLatency(Type),
+                    mLowLatencyTargetMs,
                         speedAdjustment,
                         mainPlaylistString,
                         userAgent
@@ -3083,6 +3132,7 @@ public class PlayerActivity extends Activity {
                     mWebViewContext,
                     Type,
                     getLowLatency(Type),
+                    mLowLatencyTargetMs,
                     speedAdjustment,
                     mainPlaylistString,
                     userAgent
@@ -3130,6 +3180,7 @@ public class PlayerActivity extends Activity {
                     mWebViewContext,
                     1,
                     getLowLatency(1),
+                    mLowLatencyTargetMs,
                     speedAdjustment,
                     mainPlaylistString,
                     userAgent
@@ -3162,6 +3213,7 @@ public class PlayerActivity extends Activity {
                     mWebViewContext,
                     Type,
                     getLowLatency(Type),
+                    mLowLatencyTargetMs,
                     speedAdjustment,
                     mainPlaylistString,
                     userAgent
@@ -3219,6 +3271,11 @@ public class PlayerActivity extends Activity {
         @JavascriptInterface
         public void mSetlatencyVod(int LowLatencyVod) {
             mLowLatencyVod = LowLatencyVod;
+        }
+
+        @JavascriptInterface
+        public void mSetLatencyTargetMs(int TargetMs) {
+            mLowLatencyTargetMs = TargetMs;
         }
 
         @JavascriptInterface
@@ -3415,6 +3472,7 @@ public class PlayerActivity extends Activity {
         @JavascriptInterface
         public void setPlaybackSpeed(float speed) {
             runOnUiThread(() -> {
+                mUserPlaybackSpeed = speed;
                 for (int i = 0; i < PlayerAccount; i++) {
                     if (PlayerObj[i].player != null) PlayerObj[i].player.setPlaybackParameters(new PlaybackParameters(speed));
                 }
@@ -3478,7 +3536,8 @@ public class PlayerActivity extends Activity {
                     Duration = PlayerObj[0].player.getDuration();
                     Position = PlayerObj[0].player.getCurrentPosition();
 
-                    LiveOffset = getCurrentLiveOffset(0, Duration, Position);
+                    //Buffered content already exists, the real latency can never be below it
+                    LiveOffset = Math.max(getCurrentLiveOffset(0, Duration, Position), buffer);
                 }
 
                 getVideoStatusResult = new Gson()
@@ -3591,6 +3650,7 @@ public class PlayerActivity extends Activity {
                     mWebViewContext,
                     1,
                     getLowLatency(1),
+                    mLowLatencyTargetMs,
                     speedAdjustment,
                     mainPlaylistString,
                     userAgent
