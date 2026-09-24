@@ -491,12 +491,14 @@ feat/twitch-prefetch            merged — EXT-X-TWITCH-PREFETCH parsing
     └ feat/hls-origin-cushion   merged — cushion from the multivariant playlist
 exp/audio-pitch-follows-speed   NOT merged — the app side reverted it, mainline would carry dead code
 feat/renderer-unread-duration   NOT merged yet — prerequisite of feat/adaptive-buffer-sizing
+ └ feat/video-output-gap-grace  NOT merged yet — prerequisite of feat/adaptive-buffer-sizing
 ```
 
 `feat/renderer-unread-duration` branches from `main` and adds
-`MediaCodecRenderer.getUnreadQueuedDurationUs()`. `feat/adaptive-buffer-sizing` calls it, so the
-app branch only builds against a media checkout that contains it. Merge it into media `main`
-together with the app branch.
+`MediaCodecRenderer.getUnreadQueuedDurationUs()`. `feat/video-output-gap-grace` stacks on it and
+adds `MediaCodecVideoRenderer.setOutputGapGraceMs(long)`. `feat/adaptive-buffer-sizing` calls both,
+so the app branch only builds against a media checkout that contains the grace branch. Merge both
+into media `main` together with the app branch.
 
 Every merge into `main` is a `--no-ff` merge commit, so any single feature can be reverted on its
 own. The feature branches are kept after merging; delete one only once its work is certainly not
@@ -706,6 +708,9 @@ prefix:
 - `AUDIO-UNDERRUN bufMs= sinceFeedMs=` — the audio path starving, which is *not* a buffer
   underrun and has a different cause.
 - `DROPPED-FRAMES count= elapsedMs=`
+- `VIDEO-OUTPUT-GRACE rendererId= durationMs= outcome=resumed|expired sourceReady= outputAvailable= buffersInCodec=`
+  — one record per gap the video readiness grace covered. `expired` means it did not bridge the
+  gap and a stall followed.
 
 ### Delivery progress diagnostics
 
@@ -838,3 +843,16 @@ also had `unreadLow=0`, and it is censored at 0, so it cannot say how deep a sho
 effective cushion of 473 ms, `unreadLow` reached 0 in most 5-minute blocks. At 523–573 ms
 (16:08–16:28) its block minimum stayed at 150–183 ms. Three of the four stalls happened during a
 50 ms step-down probe, from a level where unread had already been reaching 0.
+
+## Video output-gap grace
+
+`MediaCodecVideoRenderer.setOutputGapGraceMs(long)` (Media3 `feat/video-output-gap-grace`) keeps
+the video renderer ready for up to that long after its last processed output buffer, while the
+decoder still holds frames and nothing is unread. `PlayerActivity` sets 100 ms
+(`VIDEO_OUTPUT_GAP_GRACE_MS`) on every player's video renderer. It targets the full-decoder stalls
+from "September 24 stall point": the 10–20 ms wait for the decoder's next frame no longer counts
+as a rebuffer. A drained decoder, a codec flush or a longer gap still reports not ready. During a
+covered gap the playback clock and audio continue and the video frame is late or dropped.
+Playback position is never held back, so this adds no latency. A long grace would hide real video
+freezes behind continuing audio. The unit tests cover the covered gap, its expiry and the
+drained-decoder case.
