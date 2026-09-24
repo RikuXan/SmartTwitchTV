@@ -811,3 +811,9 @@ spent in the small window.
 
 This quantity, not aggregate `buf`, is the intended input for trimming the target from observed
 minima.
+
+This build was installed September 24 at about 15:46 Berlin time (PID 20196). All 75 app tests and
+the 15 `MediaCodecRendererTest`/`CodecTimingHistoryTest` cases passed. In the first minute of
+settled playback, `unreadLow` sat at 83–166 ms against a `buf` of about 430 ms. That is never
+above the 500 ms-sampled `TRACK-TIMING` `queuedAheadUs − inputAheadUs` (150–183 ms), and the
+video decoder input lead was about 240–280 ms.
