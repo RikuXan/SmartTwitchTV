@@ -856,3 +856,26 @@ covered gap the playback clock and audio continue and the video frame is late or
 Playback position is never held back, so this adds no latency. A long grace would hide real video
 freezes behind continuing audio. The unit tests cover the covered gap, its expiry and the
 drained-decoder case.
+
+Installed September 24 at about 18:12 Berlin time (PID 28159). The Mac capture lost most of
+18:17–20:08, so the evaluation uses the device files, which are complete. Compared over the same
+`eun12` channel:
+
+| | before (PID 20196) | with grace (PID 28159) |
+| --- | --- | --- |
+| playing time | 2.4 h (15:48–18:12) | 4.9 h (18:12–23:08) |
+| main-player stalls | 5 (2.1/h) | 7 (1.4/h) |
+| full-decoder stalls | 2 (13–14 frames in codec) | 0 |
+| drained-decoder stalls | 3 | 7, all with `buf` 39–93 ms |
+| median LTB | 656 ms | 534 ms |
+| dropped frames | 0 | 5, in 2 events |
+
+The main player logged 107 `resumed` grace episodes: median 10 ms, 90th percentile 32 ms,
+maximum 102 ms. 108 ended because new media arrived and 62 because the decoder produced a frame,
+counting the small-window player's episodes too. Every `expired` episode had 1–2 frames left in
+the decoder and was followed by a stall, so drains are still reported. Because stalls stopped,
+the step-down probes walked the effective cushion from 473 ms down to the 250 ms user floor.
+From 22:42 it ran there with a median LTB of 404 ms, 39 bridged gaps and no stall. Six of the
+seven remaining stalls followed slow segment loads (`loadAgeMs` 1495–2381, `mediaNoByteMs`
+327–494). With the grace, the stall point in aggregate terms is 40–90 ms, not about 250 ms. The
+evening and afternoon deliveries are not a controlled comparison.
