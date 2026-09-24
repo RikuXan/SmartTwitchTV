@@ -521,7 +521,9 @@ no way to push JS to the device without rebuilding and reinstalling.
 # The low-latency feature
 
 This fork's main purpose. Goal: sit as close to the live edge as the stream's delivery allows,
-without buffer-underrun stutters. Latency currently runs ~1.3–1.6 s live-to-broadcast on an EU
+without buffer-underrun stutters during normal segment delivery. Stalls caused by abnormal delivery,
+such as hard server errors or a pause inside a segment's byte stream, are acceptable. Buffer
+sizing must ignore them rather than grow the cushion for them. Latency currently runs ~1.3–1.6 s live-to-broadcast on an EU
 stream with a 0.25–0.5 s cushion, which is ahead of the browser on the same stream.
 
 ## Why the control target is the buffer, not the live offset
@@ -875,7 +877,15 @@ maximum 102 ms. 108 ended because new media arrived and 62 because the decoder p
 counting the small-window player's episodes too. Every `expired` episode had 1–2 frames left in
 the decoder and was followed by a stall, so drains are still reported. Because stalls stopped,
 the step-down probes walked the effective cushion from 473 ms down to the 250 ms user floor.
-From 22:42 it ran there with a median LTB of 404 ms, 39 bridged gaps and no stall. Six of the
-seven remaining stalls followed slow segment loads (`loadAgeMs` 1495–2381, `mediaNoByteMs`
-327–494). With the grace, the stall point in aggregate terms is 40–90 ms, not about 250 ms. The
-evening and afternoon deliveries are not a controlled comparison.
+From 22:42 it ran there with a median LTB of 404 ms, 39 bridged gaps and no stall. With the grace,
+the stall point in aggregate terms is 40–90 ms, not about 250 ms. The evening and afternoon
+deliveries are not a controlled comparison.
+
+A `loadAgeMs` of about 2 s is normal and does not mark a slow load. Twitch streams each 2 s
+prefetch segment while it is produced, so every media request lasts about 2000 ms (p99 2025 ms).
+Within a request, bytes normally arrive with gaps of about 83 ms: `maxByteGapMs` has a median of
+83 ms and a p99 of 105–165 ms. Eight of the twelve stalls across both builds had a byte gap of
+357–501 ms in the request in flight, which is abnormal delivery. The other four had 66–100 ms:
+16:04 and 16:41 (full decoder, now bridged by the grace), 18:10 and 21:04 (drained). At a
+250 ms cut-off, 0.46% of media requests count as abnormal. The active request's time without bytes
+is live in `TwitchDeliveryProgress` (`mediaNoByteMs`).
