@@ -787,11 +787,16 @@ The first analysis of `TRACK-TIMING` against real stalls used the September 19�
 About 23 of 31 ordinary main-player stalls had the same shape. The video sample queue had drained
 into the decoder (`queuedAheadUs − inputAheadUs` at 0–67 ms, median 16), but aggregate `buf` still
 read 220–320 ms. That remainder sat inside the Shield's video decoder, which held 10–14 buffers
-(an `inputAheadUs` of about 230–290 ms) and produced no output without further input. Audio was not
-the track that ran out; roughly 300 ms of decoded audio sat downstream of its decoder. Just before
-several of these stalls the shadow reported 119–224 ms of headroom. A trim based on the aggregate
-minimum therefore cuts into the decoder pipeline. The pipeline is a frame count, so its duration
-varies with frame rate.
+(an `inputAheadUs` of about 230–290 ms). Audio was not the track that ran out; roughly 300 ms of
+decoded audio sat downstream of its decoder. Just before several of these stalls the shadow
+reported 119–224 ms of headroom, so a trim based on the aggregate minimum would have trimmed into
+stalls.
+
+The decoder does not refuse to drain; the September 24 data below corrects that reading.
+`MediaCodecRenderer.isReady()` needs an unread sample, a dequeued output frame, or the codec
+hotswap grace. With nothing unread, the renderer is ready only while the decoder has the next
+frame out on time. A 10–20 ms output gap with a full decoder then drops the player into
+buffering, and the recovery threshold turns it into a 250–450 ms stall.
 
 About 7 other stalls had a shallow decoder input lead (about 50 ms). In those, `buf` fell from
 300–580 ms to about 80–100 ms in under a second with no media request in flight. They look like
@@ -817,3 +822,19 @@ the 15 `MediaCodecRendererTest`/`CodecTimingHistoryTest` cases passed. In the fi
 settled playback, `unreadLow` sat at 83–166 ms against a `buf` of about 430 ms. That is never
 above the 500 ms-sampled `TRACK-TIMING` `queuedAheadUs − inputAheadUs` (150–183 ms), and the
 video decoder input lead was about 240–280 ms.
+
+The first 91 minutes of that process (15:48–17:19, one `eun12` source, no sequence gaps) had four
+main-player stalls, and each began with unread video at 0. They came in two shapes:
+
+- 16:04 and 16:41: delivery was normal (`loadAgeMs` 371 and 492). The decoder still held 13–14
+  frames when video readiness dropped, and readiness returned 8–21 ms later. The stalls still lasted
+  423 and 313 ms.
+- 15:59 and 17:08: slow segments (`loadAgeMs` 1440 and 920) held unread at 0 for about 200 ms.
+  The decoder then drained to 1–4 frames with `buf` at 77 and 131 ms, and the stalls lasted
+  266–298 ms.
+
+Unread reaching 0 is necessary but not sufficient. 66 heartbeats more than 10 s from any stall
+also had `unreadLow=0`, and it is censored at 0, so it cannot say how deep a shortfall went. At an
+effective cushion of 473 ms, `unreadLow` reached 0 in most 5-minute blocks. At 523–573 ms
+(16:08–16:28) its block minimum stayed at 150–183 ms. Three of the four stalls happened during a
+50 ms step-down probe, from a level where unread had already been reaching 0.
