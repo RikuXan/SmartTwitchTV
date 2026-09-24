@@ -663,6 +663,16 @@ public class PlayerActivity extends Activity {
                 )
                 .build();
 
+            for (int i = 0; i < PlayerObj[PlayerObjPosition].player.getRendererCount(); i++) {
+                androidx.media3.exoplayer.Renderer renderer = PlayerObj[PlayerObjPosition].player.getRenderer(i);
+                if (renderer instanceof androidx.media3.exoplayer.video.MediaCodecVideoRenderer) {
+                    PlayerObj[PlayerObjPosition].SpeedControl.setUnreadVideoSource(
+                        ((androidx.media3.exoplayer.video.MediaCodecVideoRenderer) renderer)::getUnreadQueuedDurationUs
+                    );
+                    break;
+                }
+            }
+
             if (LL_DIAG) {
                 for (int i = 0; i < PlayerObj[PlayerObjPosition].player.getRendererCount(); i++) {
                     androidx.media3.exoplayer.Renderer renderer = PlayerObj[PlayerObjPosition].player.getRenderer(i);
@@ -1305,6 +1315,8 @@ public class PlayerActivity extends Activity {
                             " pp=" + PlayerObj[0].player.getPlaybackParameters().speed +
                             " pos=" + pos +
                             " ctlMin=" + (PlayerObj[0].SpeedControl != null ? PlayerObj[0].SpeedControl.getWindowedMinMs() : -1) +
+                            " ctlUnreadMin=" + (PlayerObj[0].SpeedControl != null ? PlayerObj[0].SpeedControl.getWindowedUnreadVideoMinMs() : -1) +
+                            " unreadLow=" + (PlayerObj[0].SpeedControl != null ? PlayerObj[0].SpeedControl.takeUnreadVideoLowMs() : -1) +
                             " ctlStallX=" + (PlayerObj[0].SpeedControl != null ? PlayerObj[0].SpeedControl.getStallExtraMs() : -1) +
                             " ctlLearned=" + (PlayerObj[0].SpeedControl != null ? PlayerObj[0].SpeedControl.getLearnedCushionMs() : -1) +
                             " ctlConfirmed=" + (PlayerObj[0].SpeedControl != null && PlayerObj[0].SpeedControl.isReserveConfirmed()) +

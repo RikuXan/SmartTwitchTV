@@ -14,6 +14,7 @@ import androidx.media3.common.C;
 import androidx.media3.common.MediaItem.LiveConfiguration;
 import androidx.media3.common.util.Util;
 import androidx.media3.exoplayer.LivePlaybackSpeedControl;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.LongSupplier;
 
 //Steers playback speed to hold the windowed minimum of the buffered duration at the configured
@@ -41,6 +42,9 @@ public final class TwitchLivePlaybackSpeedControl implements LivePlaybackSpeedCo
     private double playbackAdvanceUs;
 
     private final long[] bucketMinAtNormalSpeedUs = new long[WINDOW_BUCKETS];
+    private final long[] bucketUnreadVideoMinAtNormalSpeedUs = new long[WINDOW_BUCKETS];
+    private volatile LongSupplier unreadVideoUs = () -> C.TIME_UNSET;
+    private final AtomicLong unreadVideoLowUs = new AtomicLong(Long.MAX_VALUE);
     private long lastBucket = Long.MIN_VALUE;
     private long windowFullAtMs = C.TIME_UNSET;
     private boolean armed = false;
@@ -68,6 +72,10 @@ public final class TwitchLivePlaybackSpeedControl implements LivePlaybackSpeedCo
         cushionUs = liveConfiguration.targetOffsetMs != C.TIME_UNSET ? Util.msToUs(liveConfiguration.targetOffsetMs) : C.TIME_UNSET;
         minPlaybackSpeed = liveConfiguration.minPlaybackSpeed != C.RATE_UNSET ? liveConfiguration.minPlaybackSpeed : 1f;
         maxPlaybackSpeed = liveConfiguration.maxPlaybackSpeed != C.RATE_UNSET ? liveConfiguration.maxPlaybackSpeed : 1f;
+    }
+
+    void setUnreadVideoSource(LongSupplier unreadVideoUs) {
+        this.unreadVideoUs = unreadVideoUs;
     }
 
     @Override
@@ -101,6 +109,9 @@ public final class TwitchLivePlaybackSpeedControl implements LivePlaybackSpeedCo
         }
         lastSampleMs = nowMs;
 
+        long unreadUs = unreadVideoUs.getAsLong();
+        if (unreadUs != C.TIME_UNSET) unreadVideoLowUs.accumulateAndGet(unreadUs, Math::min);
+
         //Samples from the startup fill ramp are not delivery jitter and must never enter the
         //window; the ramp is only over once the buffer stops setting new maxima, and arming must
         //happen near the peak so a mid-fill delivery hiccup cannot fake the plateau
@@ -123,7 +134,7 @@ public final class TwitchLivePlaybackSpeedControl implements LivePlaybackSpeedCo
             }
         }
 
-        recordBuffer(nowMs, bufferedDurationUs);
+        recordBuffer(nowMs, bufferedDurationUs, unreadUs);
         if (!shadowStallPending) {
             shadow.sample(nowMs, bufferedDurationUs, Math.round(playbackAdvanceUs), cushionUs, cushionUs + cushion.getExtraUs());
         }
@@ -204,6 +215,16 @@ public final class TwitchLivePlaybackSpeedControl implements LivePlaybackSpeedCo
         return windowFullAtMs != C.TIME_UNSET && nowMs >= windowFullAtMs;
     }
 
+    public long getWindowedUnreadVideoMinMs() {
+        long min = minimum(bucketUnreadVideoMinAtNormalSpeedUs);
+        return !armed || min == Long.MAX_VALUE ? -1 : Util.usToMs(Math.max(0, min - Math.round(playbackAdvanceUs)));
+    }
+
+    public long takeUnreadVideoLowMs() {
+        long lowUs = unreadVideoLowUs.getAndSet(Long.MAX_VALUE);
+        return lowUs == Long.MAX_VALUE ? -1 : Util.usToMs(lowUs);
+    }
+
     public long getStallExtraMs() {
         return Util.usToMs(cushion.getExtraUs());
     }
@@ -212,28 +233,39 @@ public final class TwitchLivePlaybackSpeedControl implements LivePlaybackSpeedCo
         return adjustedSpeed;
     }
 
-    private void recordBuffer(long nowMs, long bufferedDurationUs) {
+    private void recordBuffer(long nowMs, long bufferedDurationUs, long unreadVideoUs) {
         long bucket = nowMs / BUCKET_MS;
 
         if (bucket != lastBucket) {
             long clear = lastBucket == Long.MIN_VALUE ? WINDOW_BUCKETS : Math.min(bucket - lastBucket, (long) WINDOW_BUCKETS);
             for (long b = 0; b < clear; b++) {
-                bucketMinAtNormalSpeedUs[(int) Math.floorMod(bucket - b, WINDOW_BUCKETS)] = Long.MAX_VALUE;
+                int cleared = (int) Math.floorMod(bucket - b, WINDOW_BUCKETS);
+                bucketMinAtNormalSpeedUs[cleared] = Long.MAX_VALUE;
+                bucketUnreadVideoMinAtNormalSpeedUs[cleared] = Long.MAX_VALUE;
             }
             if (clear == WINDOW_BUCKETS) windowFullAtMs = nowMs + WINDOW_BUCKETS * BUCKET_MS;
             lastBucket = bucket;
         }
 
         int index = (int) Math.floorMod(bucket, WINDOW_BUCKETS);
-        bucketMinAtNormalSpeedUs[index] = Math.min(bucketMinAtNormalSpeedUs[index], bufferedDurationUs + Math.round(playbackAdvanceUs));
+        long advanceUs = Math.round(playbackAdvanceUs);
+        bucketMinAtNormalSpeedUs[index] = Math.min(bucketMinAtNormalSpeedUs[index], bufferedDurationUs + advanceUs);
+        if (unreadVideoUs != C.TIME_UNSET) {
+            bucketUnreadVideoMinAtNormalSpeedUs[index] = Math.min(bucketUnreadVideoMinAtNormalSpeedUs[index], unreadVideoUs + advanceUs);
+        }
     }
 
     private long windowedMinUs() {
+        long min = minimum(bucketMinAtNormalSpeedUs);
+        return min == Long.MAX_VALUE ? 0 : Math.max(0, min - Math.round(playbackAdvanceUs));
+    }
+
+    private static long minimum(long[] buckets) {
         long min = Long.MAX_VALUE;
-        for (long bucketValue : bucketMinAtNormalSpeedUs) {
+        for (long bucketValue : buckets) {
             min = Math.min(min, bucketValue);
         }
-        return min == Long.MAX_VALUE ? 0 : Math.max(0, min - Math.round(playbackAdvanceUs));
+        return min;
     }
 
     public void onDeliveryError(long realtimeMs) {

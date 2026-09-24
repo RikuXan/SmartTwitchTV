@@ -42,6 +42,7 @@ public class TwitchLivePlaybackSpeedControlTest {
         final TwitchLivePlaybackSpeedControl control = new TwitchLivePlaybackSpeedControl(clock);
         double speedAdvanceUs;
         float speed = 1f;
+        long unreadVideoUs = C.TIME_UNSET;
 
         Playback() {
             control.setLiveConfiguration(new LiveConfiguration.Builder()
@@ -49,6 +50,7 @@ public class TwitchLivePlaybackSpeedControlTest {
                 .setMinPlaybackSpeed(0.97f)
                 .setMaxPlaybackSpeed(1.05f)
                 .build());
+            control.setUnreadVideoSource(() -> unreadVideoUs);
         }
 
         float sample(long bufferUs) {
@@ -100,6 +102,61 @@ public class TwitchLivePlaybackSpeedControlTest {
         long remainingMinimumMs = Math.round((500000 + advanceAtLow - p.speedAdvanceUs) / 1000d);
         assertTrue(remainingMinimumMs < 400);
         assertEquals(remainingMinimumMs, p.control.getWindowedMinMs(), 1);
+    }
+
+    @Test
+    public void unreadVideoWindowKeepsItsOwnMinimumUntilTheBucketExpires() {
+        Playback p = new Playback();
+        p.unreadVideoUs = 300000;
+        p.hold(14000, 500000);
+        assertEquals(300, p.control.getWindowedUnreadVideoMinMs());
+        p.unreadVideoUs = 40000;
+        p.sample(500000);
+        p.unreadVideoUs = 300000;
+        p.hold(3000, 500000);
+        assertEquals(40, p.control.getWindowedUnreadVideoMinMs());
+        assertEquals(500, p.control.getWindowedMinMs());
+        p.hold(8000, 500000);
+        assertEquals(300, p.control.getWindowedUnreadVideoMinMs());
+    }
+
+    @Test
+    public void slowingRebuildsHistoricalUnreadVideoMinimum() {
+        Playback p = new Playback();
+        p.unreadVideoUs = 600000;
+        p.hold(14000, 500000);
+        p.unreadVideoUs = 50000;
+        p.sample(200000);
+        double advanceAtLow = p.speedAdvanceUs;
+        p.unreadVideoUs = 600000;
+        p.hold(7000, 800000);
+        long rebuiltMinimumMs = Math.round((50000 + advanceAtLow - p.speedAdvanceUs) / 1000d);
+        assertTrue(rebuiltMinimumMs > 150);
+        assertEquals(rebuiltMinimumMs, p.control.getWindowedUnreadVideoMinMs(), 1);
+    }
+
+    @Test
+    public void unknownUnreadVideoLeavesWindowAndLowUnavailable() {
+        Playback p = new Playback();
+        p.hold(14000, 500000);
+        assertEquals(500, p.control.getWindowedMinMs());
+        assertEquals(-1, p.control.getWindowedUnreadVideoMinMs());
+        assertEquals(-1, p.control.takeUnreadVideoLowMs());
+    }
+
+    @Test
+    public void unreadVideoLowReportsMinimumSinceLastTake() {
+        Playback p = new Playback();
+        p.unreadVideoUs = 300000;
+        p.sample(500000);
+        p.unreadVideoUs = 120000;
+        p.sample(500000);
+        p.unreadVideoUs = 250000;
+        p.sample(500000);
+        assertEquals(120, p.control.takeUnreadVideoLowMs());
+        p.sample(500000);
+        assertEquals(250, p.control.takeUnreadVideoLowMs());
+        assertEquals(-1, p.control.takeUnreadVideoLowMs());
     }
 
     @Test
