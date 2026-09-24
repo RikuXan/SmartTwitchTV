@@ -561,6 +561,9 @@ function PlayExtraVod_EnterVodMain() {
     Chat_title = ' VOD';
     Play_isOn = false;
     PlayVod_isOn = true;
+    //Pause and seek only restart the vod chat while this is set
+    PlayClip_HasVOD = true;
+    ChannelVod_vodOffset = 0;
 
     Main_textContentWithEle(Play_BottonIcons_Progress_Duration, Play_timeS(Play_DurationSeconds));
     Main_ShowElementWithEle(Play_BottonIcons_Progress_PauseHolder);
