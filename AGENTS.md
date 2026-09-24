@@ -222,8 +222,11 @@ when the capture is healthy. Confirm with `docker exec stv-logcat bash -c 'timeo
 
 After the September 9 reconnect, the host could reach `10.0.47.45:5555` but the container
 received connection refused. `.tmp/adb/tv-relay.py` forwards a dynamically allocated host
-loopback port to the Shield; run it from the app repository and keep it running. It records
-its port and PID in `.tmp/adb/tv-relay.port` and `.tmp/adb/tv-relay.pid`. Connect the existing
+loopback port to the Shield; run it from the app repository with `/usr/bin/python3` and keep it
+running. Homebrew's `python3` runs as its own `Python.app`, which has no macOS Local Network
+permission: its connections to the Shield fail with `No route to host`, and the container's
+transport stays `offline`. The relay records its port and PID in `.tmp/adb/tv-relay.port` and
+`.tmp/adb/tv-relay.pid`. Connect the existing
 container's adb client to `host.containers.internal:<port>` and accept the Shield prompt if
 shown. This is a TCP relay, not another adb client; all adb commands still use `stv-logcat`.
 The container's existing reconnect loop only retries the direct TV address, so reconnect the
@@ -417,6 +420,8 @@ docs/agents-notes               merged — this file
 feat/settings-block-160p        merged — unrelated to low latency, rode along by accident
 feat/presence                   merged — channel points, drops, watch streaks, minute watched
 feat/pip-vod                    merged, complete — a VOD in the picture in picture player
+ └ fix/pip-vod-chat-resume        merged — vod chat restarts after pause and seek when the vod came from the pair
+fix/vod-chat-end-of-chat        merged — vod chat retries failed loads and keeps the end-of-chat page
 feat/low-latency-core           merged — the controller, the cushion setting, the speed gate
  ├ exp/audio-pitch-follows-speed  NOT merged — evaluated alternative to time stretching, then reverted
  ├ feat/audio-signalsmith         merged — Signalsmith Stretch vendored, JNI bridge, renderer wiring
@@ -440,7 +445,8 @@ feat/adaptive-buffer-sizing     live — the unbuilt control half of feat/ltb-me
 
 `feat/pip-vod` was finished and `main` was rebuilt on 2026-09-19 so the whole feature arrives in a
 single merge; `git revert -m 1` on that merge backs out all of picture in picture. The pre-rebuild
-tip is `archive/main-before-pip-rebuild-2026-09-19`.
+tip is `archive/main-before-pip-rebuild-2026-09-19`. `fix/pip-vod-chat-resume` came later and is
+stacked on it in its own merge, so revert that merge first.
 
 ### Landing a live branch as one merge
 
