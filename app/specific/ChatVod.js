@@ -457,9 +457,7 @@ function Chat_loadChatRequest(id) {
 function Chat_loadChatRequestResult(responseObj, id) {
     if (Chat_hasEnded || Chat_Id[0] !== id) return;
 
-    if (responseObj.status === 200) {
-        Chat_loadChatSuccess(responseObj.responseText, id);
-    } else {
+    if (responseObj.status !== 200 || !Chat_loadChatSuccess(responseObj.responseText, id)) {
         Chat_loadChatError(id);
     }
 }
@@ -483,8 +481,13 @@ function Chat_loadChatError(id) {
 }
 
 function Chat_loadChatSuccess(responseObj, id) {
-    var responseText = JSON.parse(responseObj),
-        comments;
+    var responseText, comments;
+
+    try {
+        responseText = JSON.parse(responseObj);
+    } catch (e) {
+        return false;
+    }
 
     var duplicatedCounter = 0,
         div,
@@ -510,7 +513,7 @@ function Chat_loadChatSuccess(responseObj, id) {
         comments = responseText.data.video.comments.edges || [];
         Chat_cursor = comments.length ? comments[0].cursor : '';
     } else {
-        return;
+        return false;
     }
 
     if (null_next && !Chat_loadingMore) {
@@ -655,7 +658,7 @@ function Chat_loadChatSuccess(responseObj, id) {
 
         if (null_next) {
             Chat_MessageVector(messageObj);
-        } else if (Chat_cursor !== '') {
+        } else {
             Chat_MessageVectorNext(messageObj);
         }
     }
@@ -671,6 +674,8 @@ function Chat_loadChatSuccess(responseObj, id) {
             Chat_loadChatNext(id); //if (Chat_cursor === '') chat has ended
         }
     }
+
+    return true;
 }
 
 function Chat_CheckUserName(displayName, login) {
@@ -806,7 +811,7 @@ function Chat_loadChatNext(id) {
 }
 
 function Chat_loadChatNextRequest(id) {
-    if (Chat_cursor === '') return;
+    if (!Chat_cursor) return;
     FullxmlHttpGet(
         PlayClip_BaseUrl,
         Play_base_chat_headers_Array,
@@ -821,9 +826,7 @@ function Chat_loadChatNextRequest(id) {
 
 function Chat_loadChatNextResult(responseObj, id) {
     if (Chat_hasEnded || Chat_Id[0] !== id) return;
-    if (responseObj.status === 200) {
-        Chat_loadChatSuccess(responseObj.responseText, id);
-    } else {
+    if (responseObj.status !== 200 || !Chat_loadChatSuccess(responseObj.responseText, id)) {
         Chat_loadChatNextError(id);
     }
 }
