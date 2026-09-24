@@ -490,7 +490,13 @@ feat/twitch-prefetch            merged — EXT-X-TWITCH-PREFETCH parsing
  └ feat/hls-low-latency-target  merged — server clock live offset, target tuning
     └ feat/hls-origin-cushion   merged — cushion from the multivariant playlist
 exp/audio-pitch-follows-speed   NOT merged — the app side reverted it, mainline would carry dead code
+feat/renderer-unread-duration   NOT merged yet — prerequisite of feat/adaptive-buffer-sizing
 ```
+
+`feat/renderer-unread-duration` branches from `main` and adds
+`MediaCodecRenderer.getUnreadQueuedDurationUs()`. `feat/adaptive-buffer-sizing` calls it, so the
+app branch only builds against a media checkout that contains it. Merge it into media `main`
+together with the app branch.
 
 Every merge into `main` is a `--no-ff` merge commit, so any single feature can be reverted on its
 own. The feature branches are kept after merging; delete one only once its work is certainly not
@@ -679,10 +685,12 @@ The runtime capture is `.tmp/ltb-browser/network-clock-runtime.log`.
 too**, deliberately. The per-tick heartbeat is the main data source:
 
 ```
-raw= shown= edgeDist= buf= pp= pos= ctlMin= ctlStallX= ctlLearned= ctlConfirmed= ctlProbe= ctlProbeWaitMs= ctlSpeed= target= lowLat= targetMs= origin= extraMs= speedAdj=
+raw= shown= edgeDist= buf= pp= pos= ctlMin= ctlUnreadMin= unreadLow= ctlStallX= ctlLearned= ctlConfirmed= ctlProbe= ctlProbeWaitMs= ctlSpeed= target= lowLat= targetMs= origin= extraMs= speedAdj=
 ```
 
-`ctlMin` is the windowed minimum, `ctlStallX` the current stall extra, `ctlSpeed` the controller's
+`ctlMin` is the windowed minimum, `ctlUnreadMin` the same speed-corrected 10 s minimum of the
+unread video (see "September 24 stall point" below), `unreadLow` the raw unread-video minimum
+since the previous heartbeat, `ctlStallX` the current stall extra, `ctlSpeed` the controller's
 output, `ctlLearned` the adaptive reserve in ms (initially the origin seed, subsequently learned/probed), `ctlProbe` the active probe state, and
 `ctlProbeWaitMs` the required eligible time between probes. `target` is the Media3 base target
 (user floor in this mode), `targetMs` the user setting, and `target + ctlStallX` the effective
@@ -771,3 +779,35 @@ Local evidence is in `.tmp/track-timing/report.md` and `.tmp/adaptive-recovery/`
 Next work is validating these track-level signals against actual stalls before using them for
 conservative-start sizing and staged reductions. Do not substitute raw sample endpoints for
 proven uninterrupted playback duration.
+
+## September 24 stall point
+
+The first analysis of `TRACK-TIMING` against real stalls used the September 19–20 capture: about
+23 hours of the `fgl27` clone's `twitchll-live.log`, starting at its September 19 01:32 records.
+About 23 of 31 ordinary main-player stalls had the same shape. The video sample queue had drained
+into the decoder (`queuedAheadUs − inputAheadUs` at 0–67 ms, median 16), but aggregate `buf` still
+read 220–320 ms. That remainder sat inside the Shield's video decoder, which held 10–14 buffers
+(an `inputAheadUs` of about 230–290 ms) and produced no output without further input. Audio was not
+the track that ran out; roughly 300 ms of decoded audio sat downstream of its decoder. Just before
+several of these stalls the shadow reported 119–224 ms of headroom. A trim based on the aggregate
+minimum therefore cuts into the decoder pipeline. The pipeline is a frame count, so its duration
+varies with frame rate.
+
+About 7 other stalls had a shallow decoder input lead (about 50 ms). In those, `buf` fell from
+300–580 ms to about 80–100 ms in under a second with no media request in flight. They look like
+codec reset or discontinuity events, not delivery shortfalls, and are not yet classified.
+
+`MediaCodecRenderer.getUnreadQueuedDurationUs()` (Media3 branch `feat/renderer-unread-duration`)
+returns the largest queued sample timestamp of the renderer's track minus the renderer's reading
+position. That is the queued media the renderer has not yet read into the decoder. It is
+`TIME_UNSET` without a stream, without queue data, or after the stream was read to its end. Each
+player binds its video renderer to its `TwitchLivePlaybackSpeedControl` at build time.
+`getAdjustedPlaybackSpeed` samples the value on the playback thread on every call, which happens
+on every `doSomeWork` iteration while playing. The controller keeps it in a second
+speed-corrected 10 s window next to the aggregate one and in an unread-video low for the
+heartbeat. Neither affects speed, cushion or recovery yet. Only the main slot's heartbeat takes the
+low, so the first `unreadLow` after a picture-in-picture swap also covers the time the player
+spent in the small window.
+
+This quantity, not aggregate `buf`, is the intended input for trimming the target from observed
+minima.
