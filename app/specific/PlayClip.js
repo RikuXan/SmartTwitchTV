@@ -1004,6 +1004,8 @@ function PlayClip_CheckIsLive(id, SetInterval, SkipHide) {
 var PlayClip_SetOpenLiveData;
 function PlayClip_SetOpenLive(response, key, ID) {
     if (ID !== PlayClip_CheckIsLiveId) return;
+    //A picture in picture swap moves the vod out of the main player while this check still runs
+    if (!PlayVod_isOn && !PlayClip_isOn) return;
 
     var obj = JSON.parse(response);
 
@@ -1021,7 +1023,7 @@ function PlayClip_SetOpenLive(response, key, ID) {
 
         Play_controls[Play_controlsOpenLive].setLabel(playing, tempData[1]);
 
-        Play_BottomShow(Play_controlsOpenLive);
+        if (!PlayVod_isOn || !PlayExtra_PicturePicture) Play_BottomShow(Play_controlsOpenLive);
 
         PlayClip_SetOpenLiveData = tempData;
 
