@@ -746,6 +746,25 @@ The implementation/test/deployment notes are `.tmp/tentative-reserve/report.md`.
 - **PiP/multi**: each player slot runs its own controller; two 1080p streams on this device can
   starve each other.
 
+## Measured sizing results
+
+The step 2 build ran on September 26 with the video output-gap grace. It covered 6.1 h of live
+`eun11` playback: 15:45–18:31, 18:32–18:57 and 20:27–23:55, because the Mac capture missed
+18:57–20:27. The effective cushion had a median of 273 ms, the buffer 387 ms, and the hourly
+median LTB was 440–505 ms. `lowsTargetMs` had a median of 270 ms (p10 199, p90 330), so the
+250 ms `ll_target` floor capped the cushion about a quarter of the time. Rare deep dips raised
+it by 25–100 ms, and about 20 minutes later, once the dip left the window, it trimmed back.
+All nine stalls with byte gaps of 338–531 ms were ignored for sizing. Two stalls had normal
+delivery. At 21:33 the cushion was 283 ms, two minutes after an abnormal stall had reset the
+lows. At 23:54 3.4 s were still buffered right before a channel switch, so it was not a
+delivery stall. For comparison, the grace build with probes (September 24 evening) had a
+median cushion of 350 ms, a buffer of 465 ms, an LTB of 534 ms and 0.2 normal-delivery stalls
+per hour. The build without the grace had 473 ms, 583 ms, 656 ms and 1.3 per hour.
+
+From 15:45 to 18:23 the LTB read about 2.3 s while the buffer (about 390 ms), `raw` (about
+1.17 s) and `edgeDist` (about 3.1 s) matched later sessions of the same channel. The extra
+latency came from outside the player; reloading the stream brought LTB back to about 0.5 s.
+
 ## Remaining limits of cushion adaptation
 
 The 150 ms margin, the 20-minute memory, the 3-minute trim spacing, the 20-minute hold after a
