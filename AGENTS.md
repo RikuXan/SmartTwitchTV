@@ -474,10 +474,9 @@ commits as already merged and a later `git merge` silently brings in only the ne
 the revert or rebasing the branch first works, but rebuilding is simpler and leaves no trap.
 
 `feat/ltb-measurement` landed the measuring half of adaptive buffer sizing and none of the control
-half: `TwitchBufferShadow` computes a recommendation that nothing reads, and the conservative-start
-controller does not exist. See "Remaining limits of cushion adaptation" and "September 19
-measurement and recovery state" below for exactly what is and is not established. That work
-continues on `feat/adaptive-buffer-sizing`, branched from `main` rather than from
+half. `feat/adaptive-buffer-sizing` adds the control half: `TwitchBufferLows` replaces
+`TwitchBufferShadow`, and measured trims replace the step-down probes (see "How the controller
+works"). It is branched from `main` rather than from
 `feat/ltb-measurement` because `main` already contains all of it.
 
 Media3 fork. `release` mirrors upstream and never moves; `main` is the default branch and has every
@@ -568,25 +567,25 @@ current slot after preview promotion; older traces retain creation-slot labels.
   is within 200 ms of its peak, or a 10 s deadline expires.
 - **Warmup asymmetry**: until one full window of real data exists, slowing below 1.0× is forbidden
   (`minSpeed = 1f`) while shaving above it is allowed — the window's early lows are fill artifacts.
-- **Stall response**: `TwitchBufferCushion` provisionally adds 250 ms (cap 1500 ms) and
-  re-arms the window. One ordinary stall gets temporary recovery allowance: held for 120 s,
-  then decayed at 25 ms/s. Another ordinary stall within 30 minutes promotes the raised allowance
-  to a learned extra; subsequent failures raise it. `ctlConfirmed` tracks this evidence separately
-  from the numeric reserve: an origin seed alone does not qualify, so its first ordinary failure
-  receives only temporary recovery allowance. Failed probes restore the previous reserve and
-  confirmation state. The effective extra is the maximum of learned
-  and temporary recovery allowance. Source reset clears both.
-- **Downward probes**: after five minutes of eligible settled playback, reduce learned extra by
-  50 ms. A failure during a probe restores the previous learned level and doubles the wait,
-  up to 30 minutes. Eligible playback needs a warm window, speed within 0.005 of 1x, and a window
-  minimum within 50 ms of the effective target. Pauses do not count. Probes stop at zero extra,
-  preserving the configured user floor. The origin estimate seeds this same adaptive reserve once
-  per source; successful probes can remove it entirely.
-- **Excluded failures**: confirmed timeout, DNS, connection/no-route errors and HTTP 401/403/429/5xx
-  media or manifest failures during the stall or within five seconds before it exclude that stall
-  from learning and roll back its provisional allowance on recovery. Request age alone, generic
-  EOF and prefetch 404 are not proof of an unusual failure. Audio-only underruns do not notify
-  the cushion policy. Recovery/error callbacks work independently of diagnostic logging.
+- **Start**: each source starts with a 200 ms adaptive reserve above the user floor
+  (`TwitchBufferCushion.START_RESERVE_US`). The origin estimate can only raise it, once per source.
+- **Measured sizing**: `TwitchBufferLows` keeps the speed-corrected minimum of the aggregate buffer
+  for each 10 s bucket over 20 minutes. A bucket counts as covered after 5 s of samples. The
+  recommended cushion is `150 ms + (median covered bucket low − lowest low)`. It is the target
+  that would have kept the worst normal-delivery low at the 150 ms margin, while the controller
+  holds the typical 10 s low at the target. Raises apply as soon as 3 buckets are covered.
+  A trim needs 18 covered buckets (3 minutes), 3 minutes since the last change and a 25 ms
+  difference, and it goes straight to the recommendation. The user floor is never undercut.
+- **Stall response**: a stall provisionally adds 250 ms (cap 1500 ms) and re-arms the window,
+  which also restarts the lows. After a normal-delivery stall the raised reserve is kept, and
+  trims are held for 20 minutes.
+- **Abnormal delivery**: `TwitchDeliveryProgress` flags a media request that goes more than
+  250 ms without bytes (`ABNORMAL_BYTE_GAP_MS`), including the first-byte wait. So do confirmed
+  timeout, DNS, connection/no-route errors and HTTP 401/403/429/5xx failures. A stall during an
+  abnormal delivery or within 15 s after one keeps no bump. Buffer lows from the gap's start until
+  15 s after its end are not measured. Samples are committed 350 ms late so that the undetected
+  first 250 ms of a gap is dropped too. Request age alone, generic EOF and prefetch 404 are not
+  abnormal. Delayed playlist responses with no media request in flight are not detected yet.
 - **Speed output**: retains the existing 1500 ms cadence, up-to-0.01 glide, and 0.005 snap threshold;
   intermediate fractional speeds remain available. Catch-up stops immediately if instantaneous
   buffer reaches the effective cushion. The audio processor remains active at 1× to preserve continuity.
@@ -689,14 +688,18 @@ The runtime capture is `.tmp/ltb-browser/network-clock-runtime.log`.
 too**, deliberately. The per-tick heartbeat is the main data source:
 
 ```
-raw= shown= edgeDist= buf= pp= pos= ctlMin= ctlUnreadMin= unreadLow= ctlStallX= ctlLearned= ctlConfirmed= ctlProbe= ctlProbeWaitMs= ctlSpeed= target= lowLat= targetMs= origin= extraMs= speedAdj=
+raw= shown= edgeDist= buf= pp= pos= ctlMin= ctlUnreadMin= unreadLow= ctlStallX= ctlLearned= lowsBuckets= lowsTypicalMs= lowsWorstMs= lowsTargetMs= ctlTrimHoldMs= abnormalGapAgoMs= ctlSpeed= target= lowLat= targetMs= origin= extraMs= speedAdj=
 ```
 
 `ctlMin` is the windowed minimum, `ctlUnreadMin` the same speed-corrected 10 s minimum of the
 unread video (see "September 24 stall point" below), `unreadLow` the raw unread-video minimum
 since the previous heartbeat, `ctlStallX` the current stall extra, `ctlSpeed` the controller's
-output, `ctlLearned` the adaptive reserve in ms (initially the origin seed, subsequently learned/probed), `ctlProbe` the active probe state, and
-`ctlProbeWaitMs` the required eligible time between probes. `target` is the Media3 base target
+output, and `ctlLearned` the adaptive reserve in ms. `lowsBuckets` counts the covered 10 s buckets.
+`lowsTypicalMs` and `lowsWorstMs` are their median and lowest buffer lows at the current speed
+trajectory. `lowsTargetMs` is the recommended cushion, -1 until 3 buckets are covered.
+`ctlTrimHoldMs` is the time left before trims resume after a normal-delivery stall.
+`abnormalGapAgoMs` is the age of the latest abnormal byte gap, 0 while one is ongoing and -1 if
+none has happened. `target` is the Media3 base target
 (user floor in this mode), `targetMs` the user setting, and `target + ctlStallX` the effective
 cushion. `extraMs` records the initial origin estimate and must not be added again. Event lines carry a `p<slot>`
 prefix:
@@ -745,11 +748,12 @@ The implementation/test/deployment notes are `.tmp/tentative-reserve/report.md`.
 
 ## Remaining limits of cushion adaptation
 
-The adaptive policy searches the whole reserve, including its initial origin estimate, above the
-configured user floor. It does not probe below the user setting. Its five-minute initial probe interval,
-50 ms step, and 30-minute failure memory are initial experimental choices. Unit tests and synthetic
-closed-loop simulations cover learning, exclusion, rollback and eventual reduction after delivery
-improves; these do not establish real-device stutter-free operation or an optimal latency.
+The 150 ms margin, the 20-minute memory, the 3-minute trim spacing, the 20-minute hold after a
+normal-delivery stall and the 250 ms byte-gap cut-off are first choices. They are calibrated
+against one evening of `eun12` playback with the video output-gap grace active. Any stall
+re-arms the window and clears the lows, so the memory is effectively shorter around stalls. The
+sizing never goes below the user setting (`ll_target`), so a floor above the recommendation
+decides the cushion by itself.
 
 
 ## September 19 measurement and recovery state
@@ -765,11 +769,9 @@ A second stall within 30 seconds or an explicit unusual delivery error restores 
 threshold for 60 seconds. Source reset clears this fallback. Startup and other modes retain their
 existing behavior. `RECOVERY-FILL` records the selected threshold and current buffer.
 
-`TwitchBufferShadow` only observes: a roughly two-minute speed-corrected buffer history, a
-one-minute minimum observation period, and an experimental 150 ms margin. It does not control
-playback. `shadowReady` must be checked before interpreting its recommendation. Aggregate HLS
-buffer duration can exceed the available runway of one track, so the shadow recommendations are
-not yet validated as safe reductions. The proposed conservative-start controller is not implemented.
+At that time `TwitchBufferShadow` only observed: a roughly two-minute speed-corrected buffer
+history, a one-minute minimum observation period and a 150 ms margin. `TwitchBufferLows` on
+`feat/adaptive-buffer-sizing` replaced it.
 
 `RENDERER-READY` identifies audio/video readiness transitions. `VIDEO-READINESS` adds source/output
 readiness and codec buffer counts. Opt-in `TRACK-TIMING` diagnostics report each HLS track's queued
