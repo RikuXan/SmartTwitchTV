@@ -1,6 +1,7 @@
 package com.fgl27.twitch;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
 import androidx.media3.common.C;
@@ -15,17 +16,17 @@ public class TwitchLivePlaybackSpeedControlTest {
         TwitchLivePlaybackSpeedControl control = new TwitchLivePlaybackSpeedControl(() -> 0L);
         TwitchBufferCushion oldSource = new TwitchBufferCushion();
         oldSource.seedOriginMs(500);
-        control.useCushion(oldSource);
+        control.useCushion(oldSource, null);
         assertEquals(500, control.getStallExtraMs());
         TwitchBufferCushion newSource = new TwitchBufferCushion();
-        control.useCushion(newSource);
+        control.useCushion(newSource, null);
         oldSource.rebuffer(0);
-        assertEquals(0, control.getStallExtraMs());
-        newSource.seedOriginMs(80);
-        assertEquals(80, control.getStallExtraMs());
+        assertEquals(200, control.getStallExtraMs());
+        newSource.seedOriginMs(700);
+        assertEquals(700, control.getStallExtraMs());
         control.setLiveConfiguration(new LiveConfiguration.Builder().setTargetOffsetMs(250)
             .setMinPlaybackSpeed(0.97f).setMaxPlaybackSpeed(1.05f).build());
-        assertEquals(80, control.getStallExtraMs());
+        assertEquals(700, control.getStallExtraMs());
     }
 
     private static final class Clock implements LongSupplier {
@@ -45,8 +46,12 @@ public class TwitchLivePlaybackSpeedControlTest {
         long unreadVideoUs = C.TIME_UNSET;
 
         Playback() {
+            this(500);
+        }
+
+        Playback(long targetMs) {
             control.setLiveConfiguration(new LiveConfiguration.Builder()
-                .setTargetOffsetMs(500)
+                .setTargetOffsetMs(targetMs)
                 .setMinPlaybackSpeed(0.97f)
                 .setMaxPlaybackSpeed(1.05f)
                 .build());
@@ -62,6 +67,10 @@ public class TwitchLivePlaybackSpeedControlTest {
 
         void hold(long durationMs, long bufferUs) {
             for (long elapsed = 0; elapsed < durationMs; elapsed += 10) sample(bufferUs);
+        }
+
+        void holdAtNormalSpeed(long durationMs, long bufferUs) {
+            for (long elapsed = 0; elapsed < durationMs; elapsed += 10) sample(Math.round(bufferUs - speedAdvanceUs));
         }
     }
 
@@ -157,6 +166,50 @@ public class TwitchLivePlaybackSpeedControlTest {
         p.sample(500000);
         assertEquals(250, p.control.takeUnreadVideoLowMs());
         assertEquals(-1, p.control.takeUnreadVideoLowMs());
+    }
+
+    @Test
+    public void measuredLowsRaiseReserveAboveTheFloor() {
+        Playback p = new Playback(100);
+        p.control.useCushion(new TwitchBufferCushion(0), new TwitchDeliveryProgress(p.clock));
+        p.holdAtNormalSpeed(20000, 400000);
+        p.holdAtNormalSpeed(10, 250000);
+        p.holdAtNormalSpeed(20000, 400000);
+        assertEquals(200, p.control.getStallExtraMs(), 1);
+    }
+
+    @Test
+    public void stallDuringAbnormalByteGapKeepsReserve() {
+        Playback p = new Playback();
+        TwitchDeliveryProgress delivery = new TwitchDeliveryProgress(p.clock);
+        p.control.useCushion(new TwitchBufferCushion(0), delivery);
+        p.hold(14000, 500000);
+        TwitchDeliveryProgress.Request request = delivery.start(true);
+        delivery.read(request, 100);
+        p.clock.nowMs += TwitchDeliveryProgress.ABNORMAL_BYTE_GAP_MS + 50;
+        p.control.notifyRebuffer();
+        p.clock.nowMs += 300;
+        p.control.onPlaybackRecovered(p.clock.nowMs);
+        assertTrue(p.control.wasStallExcluded());
+        assertEquals(0, p.control.getStallExtraMs());
+    }
+
+    @Test
+    public void stallDuringNormalDeliveryRaisesReserve() {
+        Playback p = new Playback();
+        TwitchDeliveryProgress delivery = new TwitchDeliveryProgress(p.clock);
+        p.control.useCushion(new TwitchBufferCushion(0), delivery);
+        p.hold(14000, 500000);
+        TwitchDeliveryProgress.Request request = delivery.start(true);
+        delivery.read(request, 100);
+        p.clock.nowMs += 80;
+        delivery.read(request, 100);
+        p.control.notifyRebuffer();
+        p.clock.nowMs += 80;
+        delivery.read(request, 100);
+        p.control.onPlaybackRecovered(p.clock.nowMs);
+        assertFalse(p.control.wasStallExcluded());
+        assertEquals(250, p.control.getStallExtraMs());
     }
 
     @Test

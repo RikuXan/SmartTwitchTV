@@ -701,7 +701,10 @@ public class PlayerActivity extends Activity {
 
         PlayerObj[PlayerObjPosition].player.setPlayWhenReady(true);
         if (PlayerObj[PlayerObjPosition].SpeedControl != null) {
-            PlayerObj[PlayerObjPosition].SpeedControl.useCushion(PlayerObj[PlayerObjPosition].originCushion.adaptiveCushion);
+            PlayerObj[PlayerObjPosition].SpeedControl.useCushion(
+                PlayerObj[PlayerObjPosition].originCushion.adaptiveCushion,
+                PlayerObj[PlayerObjPosition].originCushion.delivery
+            );
         }
         PlayerObj[PlayerObjPosition].player.setMediaSource(PlayerObj[PlayerObjPosition].mediaSources, PlayerObj[PlayerObjPosition].ResumePosition);
 
@@ -1322,10 +1325,7 @@ public class PlayerActivity extends Activity {
                             " unreadLow=" + (PlayerObj[0].SpeedControl != null ? PlayerObj[0].SpeedControl.takeUnreadVideoLowMs() : -1) +
                             " ctlStallX=" + (PlayerObj[0].SpeedControl != null ? PlayerObj[0].SpeedControl.getStallExtraMs() : -1) +
                             " ctlLearned=" + (PlayerObj[0].SpeedControl != null ? PlayerObj[0].SpeedControl.getLearnedCushionMs() : -1) +
-                            " ctlConfirmed=" + (PlayerObj[0].SpeedControl != null && PlayerObj[0].SpeedControl.isReserveConfirmed()) +
-                            (PlayerObj[0].SpeedControl != null ? PlayerObj[0].SpeedControl.getShadowSnapshot() : "") +
-                            " ctlProbe=" + (PlayerObj[0].SpeedControl != null && PlayerObj[0].SpeedControl.isProbingCushion()) +
-                            " ctlProbeWaitMs=" + (PlayerObj[0].SpeedControl != null ? PlayerObj[0].SpeedControl.getProbeIntervalMs() : -1) +
+                            (PlayerObj[0].SpeedControl != null ? PlayerObj[0].SpeedControl.getSizingSnapshot() : "") +
                             " ctlSpeed=" + (PlayerObj[0].SpeedControl != null ? PlayerObj[0].SpeedControl.getAdjustedSpeed() : -1) +
                             " target=" + target +
                             " lowLat=" + mLowLatency +

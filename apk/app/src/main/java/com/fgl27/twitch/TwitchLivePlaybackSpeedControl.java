@@ -33,11 +33,13 @@ public final class TwitchLivePlaybackSpeedControl implements LivePlaybackSpeedCo
     private static final float SPEED_SLEW = 0.01f;
     private static final float SPEED_SNAP = 0.005f;
     private static final long MAX_SAMPLE_GAP_MS = BUCKET_MS;
+    private static final long SIZING_INTERVAL_MS = 1000;
 
     private final LongSupplier elapsedRealtimeMs;
     private final TwitchRecoveryPolicy recovery = new TwitchRecoveryPolicy();
-    private final TwitchBufferShadow shadow = new TwitchBufferShadow();
-    private boolean shadowStallPending;
+    private final TwitchBufferLows lows = new TwitchBufferLows();
+    private boolean stallPending;
+    private long lastSizingMs = C.TIME_UNSET;
     private long lastSampleMs = C.TIME_UNSET;
     private double playbackAdvanceUs;
 
@@ -55,7 +57,8 @@ public final class TwitchLivePlaybackSpeedControl implements LivePlaybackSpeedCo
     private long cushionUs = C.TIME_UNSET;
     private float minPlaybackSpeed = 1f;
     private float maxPlaybackSpeed = 1f;
-    private volatile TwitchBufferCushion cushion = new TwitchBufferCushion();
+    private volatile TwitchBufferCushion cushion = new TwitchBufferCushion(0);
+    private volatile TwitchDeliveryProgress delivery;
     private long lastUpdateMs = C.TIME_UNSET;
     private float adjustedSpeed = 1f;
 
@@ -85,9 +88,11 @@ public final class TwitchLivePlaybackSpeedControl implements LivePlaybackSpeedCo
 
     @Override
     public void notifyRebuffer() {
-        recovery.stall(elapsedRealtimeMs.getAsLong());
-        shadowStallPending = true;
-        cushion.rebuffer(elapsedRealtimeMs.getAsLong());
+        long nowMs = elapsedRealtimeMs.getAsLong();
+        recovery.stall(nowMs);
+        stallPending = true;
+        reportAbnormalDelivery();
+        cushion.rebuffer(nowMs);
         resetWindow();
     }
 
@@ -135,11 +140,17 @@ public final class TwitchLivePlaybackSpeedControl implements LivePlaybackSpeedCo
         }
 
         recordBuffer(nowMs, bufferedDurationUs, unreadUs);
-        if (!shadowStallPending) {
-            shadow.sample(nowMs, bufferedDurationUs, Math.round(playbackAdvanceUs), cushionUs, cushionUs + cushion.getExtraUs());
+        if (!stallPending) {
+            TwitchDeliveryProgress source = delivery;
+            long gapEndMs = source != null ? source.lastAbnormalGapMs() : -1;
+            if (gapEndMs >= 0) lows.exclude(source.lastAbnormalGapStartMs(), gapEndMs);
+            lows.sample(nowMs, bufferedDurationUs, Math.round(playbackAdvanceUs));
         }
-        cushion.tick(nowMs, isWarm(nowMs) && Math.abs(adjustedSpeed - 1f) < 0.005f &&
-            windowedMinUs() >= cushionUs + cushion.getExtraUs() - DEADBAND_US);
+        if (lastSizingMs == C.TIME_UNSET || nowMs - lastSizingMs >= SIZING_INTERVAL_MS) {
+            lastSizingMs = nowMs;
+            long recommendedUs = lows.recommendedTargetUs();
+            cushion.resize(nowMs, recommendedUs == C.TIME_UNSET ? C.TIME_UNSET : recommendedUs - cushionUs, lows.isTrimReady());
+        }
         long stallExtraUs = cushion.getExtraUs();
 
         if (adjustedSpeed > 1f && bufferedDurationUs <= cushionUs + stallExtraUs) {
@@ -180,21 +191,28 @@ public final class TwitchLivePlaybackSpeedControl implements LivePlaybackSpeedCo
     public void reset() {
         resetWindow();
         cushion.reset();
-        shadow.reset();
         recovery.reset();
-        shadowStallPending = false;
+        stallPending = false;
+        lastSizingMs = C.TIME_UNSET;
     }
 
-    void useCushion(TwitchBufferCushion sourceCushion) {
+    void useCushion(TwitchBufferCushion sourceCushion, TwitchDeliveryProgress sourceDelivery) {
         resetWindow();
         cushion = sourceCushion;
-        shadow.reset();
+        delivery = sourceDelivery;
         recovery.reset();
-        shadowStallPending = false;
+        stallPending = false;
+        lastSizingMs = C.TIME_UNSET;
+    }
+
+    private void reportAbnormalDelivery() {
+        TwitchDeliveryProgress source = delivery;
+        long gapMs = source != null ? source.lastAbnormalGapMs() : -1;
+        if (gapMs >= 0) cushion.deliveryError(gapMs);
     }
 
     private void resetWindow() {
-        shadow.interrupt();
+        lows.interrupt();
         lastBucket = Long.MIN_VALUE;
         windowFullAtMs = C.TIME_UNSET;
         armed = false;
@@ -270,16 +288,14 @@ public final class TwitchLivePlaybackSpeedControl implements LivePlaybackSpeedCo
 
     public void onDeliveryError(long realtimeMs) {
         cushion.deliveryError(realtimeMs);
-        shadow.deliveryError(realtimeMs);
+        lows.exclude(realtimeMs, realtimeMs);
         recovery.deliveryError(realtimeMs);
     }
 
     public void onPlaybackRecovered(long realtimeMs) {
+        reportAbnormalDelivery();
         cushion.recovered(realtimeMs);
-        if (shadowStallPending) {
-            shadow.recovered(cushion.wasExcluded());
-            shadowStallPending = false;
-        }
+        stallPending = false;
     }
 
     long getRecoveryThresholdMs(long legacyMs) {
@@ -288,12 +304,15 @@ public final class TwitchLivePlaybackSpeedControl implements LivePlaybackSpeedCo
         return recovery.thresholdMs(elapsedRealtimeMs.getAsLong(), targetMs, legacyMs);
     }
 
-    public String getShadowSnapshot() { return shadow.snapshot(); }
-
-    public boolean isReserveConfirmed() { return cushion.isConfirmedByStalls(); }
+    public String getSizingSnapshot() {
+        TwitchDeliveryProgress source = delivery;
+        long gapMs = source != null ? source.lastAbnormalGapMs() : -1;
+        long nowMs = elapsedRealtimeMs.getAsLong();
+        return lows.snapshot(Math.round(playbackAdvanceUs)) +
+            " ctlTrimHoldMs=" + cushion.getTrimHoldMs(nowMs) +
+            " abnormalGapAgoMs=" + (gapMs >= 0 ? nowMs - gapMs : -1);
+    }
 
     public boolean wasStallExcluded() { return cushion.wasExcluded(); }
     public long getLearnedCushionMs() { return cushion.getLearnedMs(); }
-    public long getProbeIntervalMs() { return cushion.getProbeIntervalMs(); }
-    public boolean isProbingCushion() { return cushion.isProbing(); }
 }

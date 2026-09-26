@@ -54,4 +54,26 @@ public class TwitchDeliveryProgressTest {
         assertTrue(ended.contains("maxReadWaitMs=1000"));
         assertTrue(progress.snapshot().contains("mediaRequests=0"));
     }
+
+    @Test public void reportsOngoingAndFinishedAbnormalMediaByteGaps() {
+        assertEquals(-1, progress.lastAbnormalGapMs());
+        TwitchDeliveryProgress.Request manifest = progress.start(false);
+        TwitchDeliveryProgress.Request media = progress.start(true);
+        progress.read(media, 100);
+        now = TwitchDeliveryProgress.ABNORMAL_BYTE_GAP_MS;
+        progress.read(media, 100);
+        assertEquals(-1, progress.lastAbnormalGapMs());
+        now = 1000;
+        assertEquals(1000, progress.lastAbnormalGapMs());
+        assertEquals(TwitchDeliveryProgress.ABNORMAL_BYTE_GAP_MS, progress.lastAbnormalGapStartMs());
+        progress.read(media, 100);
+        now = 1100;
+        assertEquals(1000, progress.lastAbnormalGapMs());
+        assertEquals(TwitchDeliveryProgress.ABNORMAL_BYTE_GAP_MS, progress.lastAbnormalGapStartMs());
+        progress.finish(manifest, "eof");
+        now = 2000;
+        progress.finish(media, "closed");
+        assertEquals(2000, progress.lastAbnormalGapMs());
+        assertEquals(1000, progress.lastAbnormalGapStartMs());
+    }
 }
