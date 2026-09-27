@@ -765,6 +765,34 @@ From 15:45 to 18:23 the LTB read about 2.3 s while the buffer (about 390 ms), `r
 1.17 s) and `edgeDist` (about 3.1 s) matched later sessions of the same channel. The extra
 latency came from outside the player; reloading the stream brought LTB back to about 0.5 s.
 
+### With `ll_target` at 0
+
+`ll_target` was set to 0 s on September 27 at 00:22 (same build, PID 8381). The evaluation uses
+the single-stream `eun12` evening, 15:45–22:32 without the 16:37–17:06 picture in picture
+session: 6.3 h. The median effective cushion was 390 ms, the buffer 526 ms and the LTB 616 ms.
+`lowsTargetMs` had a median of 364 ms (p10 267, p90 456) and was below 250 ms only 7.7% of the
+time, so dropping the floor changed little. The day's delivery made the difference.
+
+Five stalls had byte gaps and were ignored. Six passed as normal delivery, about one per hour:
+
+- 16:03, 17:14, 17:44 and 19:20 were trickles. The media request's bytes fell to 118–257 KB per
+  500 ms heartbeat, against a median of about 510 KB and a 1st percentile of 273 KB. Media stopped
+  arriving and the buffer fell 350–470 ms within about a second. No single pause exceeded
+  250 ms, so `ABNORMAL_BYTE_GAP_MS` did not flag them.
+- 18:48 and 20:44 happened at a segment boundary. The next segment's first frames arrived
+  350–450 ms after the previous segment completed; at 18:48 the first byte took 127 ms (normally
+  30–55). The 20:44 stall came two minutes after a trim to 214 ms. That trim followed the
+  abnormal stall at 20:39, which had cleared the lows while they recommended 407 ms.
+
+Buffer drops of at least 200 ms within one second during trickling bytes happened 3.5 times per
+hour on this evening, and 0.3–1.3 times per hour on September 26's `eun11`.
+
+The recommendation also creeps upward without new dips. At 1.0× the buffer drifts upward inside
+the controller's ±50 ms deadband. The window's median follows the drift, but the worst low keeps
+the level it had when it happened, so median − worst grows. From 21:36 to 22:04 the cushion rose
+from 425 to 501 ms in 25 ms steps with no deeper dip. At 22:05 the 21:35 dip left the window and the
+cushion trimmed to 337 ms. Of the day's 1333 ms of raises, 413 ms came from this creep.
+
 ## Remaining limits of cushion adaptation
 
 The 150 ms margin, the 20-minute memory, the 3-minute trim spacing, the 20-minute hold after a
