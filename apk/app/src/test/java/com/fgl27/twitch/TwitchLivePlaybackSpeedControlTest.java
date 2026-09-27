@@ -172,9 +172,30 @@ public class TwitchLivePlaybackSpeedControlTest {
     public void measuredLowsRaiseReserveAboveTheFloor() {
         Playback p = new Playback(100);
         p.control.useCushion(new TwitchBufferCushion(0), new TwitchDeliveryProgress(p.clock));
-        p.holdAtNormalSpeed(20000, 400000);
+        p.holdAtNormalSpeed(40000, 400000);
         p.holdAtNormalSpeed(10, 250000);
         p.holdAtNormalSpeed(20000, 400000);
+        assertEquals(200, p.control.getStallExtraMs(), 1);
+    }
+
+    @Test
+    public void stallDuringAbnormalDeliveryKeepsMeasuredDips() {
+        Playback p = new Playback(100);
+        TwitchDeliveryProgress delivery = new TwitchDeliveryProgress(p.clock);
+        p.control.useCushion(new TwitchBufferCushion(0), delivery);
+        p.holdAtNormalSpeed(40000, 400000);
+        p.holdAtNormalSpeed(10, 250000);
+        p.holdAtNormalSpeed(20000, 400000);
+        TwitchDeliveryProgress.Request request = delivery.start(true);
+        delivery.read(request, 100);
+        p.clock.nowMs += TwitchDeliveryProgress.ABNORMAL_BYTE_GAP_MS + 50;
+        p.control.notifyRebuffer();
+        p.clock.nowMs += 300;
+        delivery.read(request, 100);
+        delivery.finish(request, "eof");
+        p.control.onPlaybackRecovered(p.clock.nowMs);
+        assertTrue(p.control.wasStallExcluded());
+        p.holdAtNormalSpeed(240000, 400000);
         assertEquals(200, p.control.getStallExtraMs(), 1);
     }
 

@@ -142,8 +142,8 @@ public final class TwitchLivePlaybackSpeedControl implements LivePlaybackSpeedCo
         recordBuffer(nowMs, bufferedDurationUs, unreadUs);
         if (!stallPending) {
             TwitchDeliveryProgress source = delivery;
-            long gapEndMs = source != null ? source.lastAbnormalGapMs() : -1;
-            if (gapEndMs >= 0) lows.exclude(source.lastAbnormalGapStartMs(), gapEndMs);
+            long abnormalEndMs = source != null ? source.lastAbnormalDeliveryMs() : -1;
+            if (abnormalEndMs >= 0) lows.exclude(source.lastAbnormalDeliveryStartMs(), abnormalEndMs);
             lows.sample(nowMs, bufferedDurationUs, Math.round(playbackAdvanceUs));
         }
         if (lastSizingMs == C.TIME_UNSET || nowMs - lastSizingMs >= SIZING_INTERVAL_MS) {
@@ -190,6 +190,7 @@ public final class TwitchLivePlaybackSpeedControl implements LivePlaybackSpeedCo
 
     public void reset() {
         resetWindow();
+        lows.clear();
         cushion.reset();
         recovery.reset();
         stallPending = false;
@@ -198,6 +199,7 @@ public final class TwitchLivePlaybackSpeedControl implements LivePlaybackSpeedCo
 
     void useCushion(TwitchBufferCushion sourceCushion, TwitchDeliveryProgress sourceDelivery) {
         resetWindow();
+        lows.clear();
         cushion = sourceCushion;
         delivery = sourceDelivery;
         recovery.reset();
@@ -207,8 +209,8 @@ public final class TwitchLivePlaybackSpeedControl implements LivePlaybackSpeedCo
 
     private void reportAbnormalDelivery() {
         TwitchDeliveryProgress source = delivery;
-        long gapMs = source != null ? source.lastAbnormalGapMs() : -1;
-        if (gapMs >= 0) cushion.deliveryError(gapMs);
+        long abnormalMs = source != null ? source.lastAbnormalDeliveryMs() : -1;
+        if (abnormalMs >= 0) cushion.deliveryError(abnormalMs);
     }
 
     private void resetWindow() {
@@ -306,11 +308,11 @@ public final class TwitchLivePlaybackSpeedControl implements LivePlaybackSpeedCo
 
     public String getSizingSnapshot() {
         TwitchDeliveryProgress source = delivery;
-        long gapMs = source != null ? source.lastAbnormalGapMs() : -1;
+        long abnormalMs = source != null ? source.lastAbnormalDeliveryMs() : -1;
         long nowMs = elapsedRealtimeMs.getAsLong();
         return lows.snapshot(Math.round(playbackAdvanceUs)) +
             " ctlTrimHoldMs=" + cushion.getTrimHoldMs(nowMs) +
-            " abnormalGapAgoMs=" + (gapMs >= 0 ? nowMs - gapMs : -1);
+            " abnormalAgoMs=" + (abnormalMs >= 0 ? nowMs - abnormalMs : -1);
     }
 
     public boolean wasStallExcluded() { return cushion.wasExcluded(); }

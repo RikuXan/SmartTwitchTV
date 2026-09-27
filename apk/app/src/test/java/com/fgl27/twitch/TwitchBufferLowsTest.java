@@ -13,14 +13,14 @@ public class TwitchBufferLowsTest {
         for (long end = now + durationMs; now < end; now += 10) lows.sample(now, bufferUs, advanceUs);
     }
 
-    @Test public void needsThreeCoveredBucketsBeforeRecommending() {
-        hold(20000, 400000, 0);
+    @Test public void needsThreeLevelBucketsBeforeRecommending() {
+        hold(25000, 400000, 0);
         assertEquals(C.TIME_UNSET, lows.recommendedTargetUs());
-        hold(15000, 400000, 0);
+        hold(20000, 400000, 0);
         assertEquals(TwitchBufferLows.MARGIN_US, lows.recommendedTargetUs());
     }
 
-    @Test public void rareDipRaisesRecommendationByItsExtraDepth() {
+    @Test public void rareDipRaisesRecommendationByItsDepth() {
         hold(60000, 400000, 0);
         hold(10, 250000, 0);
         hold(60000, 400000, 0);
@@ -33,11 +33,18 @@ public class TwitchBufferLowsTest {
         assertEquals(TwitchBufferLows.MARGIN_US, lows.recommendedTargetUs());
     }
 
-    @Test public void excludedGapIncludingItsUndetectedOnsetDoesNotCount() {
+    @Test public void levelDriftAfterADipDoesNotDeepenIt() {
         hold(60000, 400000, 0);
-        long gapStartMs = now;
-        hold(260, 150000, 0);
-        lows.exclude(gapStartMs, now + 40);
+        hold(10, 250000, 0);
+        for (int minute = 0; minute < 10; minute++) hold(60000, 400000 + minute * 10000, 0);
+        assertEquals(TwitchBufferLows.MARGIN_US + 150000, lows.recommendedTargetUs());
+    }
+
+    @Test public void excludedDeliveryIncludingItsUndetectedOnsetDoesNotCount() {
+        hold(60000, 400000, 0);
+        long abnormalStartMs = now;
+        hold(TwitchDeliveryProgress.DETECTION_DELAY_MS, 150000, 0);
+        lows.exclude(abnormalStartMs, now + 40);
         hold(40, 150000, 0);
         hold(60000, 400000, 0);
         assertEquals(TwitchBufferLows.MARGIN_US, lows.recommendedTargetUs());
@@ -57,19 +64,38 @@ public class TwitchBufferLowsTest {
         assertEquals(TwitchBufferLows.MARGIN_US, lows.recommendedTargetUs());
     }
 
-    @Test public void trimNeedsThreeMinutesOfCoveredBuckets() {
-        hold(170000, 400000, 0);
+    @Test public void trimNeedsThreeMinutesOfMeasuredBuckets() {
+        hold(200000, 400000, 0);
         assertFalse(lows.isTrimReady());
         hold(20000, 400000, 0);
         assertTrue(lows.isTrimReady());
     }
 
-    @Test public void interruptClearsHistoryAndPendingSamples() {
+    @Test public void interruptKeepsMeasuredDipsAndRestartsTheLevel() {
+        hold(60000, 400000, 0);
+        hold(10, 250000, 0);
+        hold(20000, 400000, 0);
+        lows.interrupt();
+        hold(60000, 900000, 0);
+        assertEquals(TwitchBufferLows.MARGIN_US + 150000, lows.recommendedTargetUs());
+        assertFalse(lows.isTrimReady());
+        assertTrue(lows.snapshot(0).contains(" lowsLevelMs=900"));
+    }
+
+    @Test public void interruptDropsSamplesNotYetCommitted() {
         hold(60000, 400000, 0);
         hold(100, 100000, 0);
         lows.interrupt();
         hold(60000, 400000, 0);
         assertEquals(TwitchBufferLows.MARGIN_US, lows.recommendedTargetUs());
-        assertTrue(lows.snapshot(0).contains(" lowsWorstMs=400"));
+    }
+
+    @Test public void clearForgetsEverything() {
+        hold(60000, 400000, 0);
+        hold(10, 250000, 0);
+        hold(20000, 400000, 0);
+        lows.clear();
+        assertEquals(C.TIME_UNSET, lows.recommendedTargetUs());
+        assertTrue(lows.snapshot(0).contains(" lowsBuckets=0 "));
     }
 }

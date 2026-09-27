@@ -569,23 +569,31 @@ current slot after preview promotion; older traces retain creation-slot labels.
   (`minSpeed = 1f`) while shaving above it is allowed — the window's early lows are fill artifacts.
 - **Start**: each source starts with a 200 ms adaptive reserve above the user floor
   (`TwitchBufferCushion.START_RESERVE_US`). The origin estimate can only raise it, once per source.
-- **Measured sizing**: `TwitchBufferLows` keeps the speed-corrected minimum of the aggregate buffer
-  for each 10 s bucket over 20 minutes. A bucket counts as covered after 5 s of samples. The
-  recommended cushion is `150 ms + (median covered bucket low − lowest low)`. It is the target
-  that would have kept the worst normal-delivery low at the 150 ms margin, while the controller
-  holds the typical 10 s low at the target. Raises apply as soon as 3 buckets are covered.
-  A trim needs 18 covered buckets (3 minutes), 3 minutes since the last change and a 25 ms
-  difference, and it goes straight to the recommendation. The user floor is never undercut.
-- **Stall response**: a stall provisionally adds 250 ms (cap 1500 ms) and re-arms the window,
-  which also restarts the lows. After a normal-delivery stall the raised reserve is kept, and
-  trims are held for 20 minutes.
+- **Measured sizing**: `TwitchBufferLows` takes the speed-corrected minimum of the aggregate
+  buffer for each 10 s bucket. A bucket counts as covered after 5 s of samples. The level is the
+  median low of the last 6 covered buckets, with at least 3 required. Each bucket's depth is that
+  level minus its own low, and the depths are kept for 20 minutes. The recommended cushion is
+  `150 ms + deepest depth`, the target that would have kept the worst normal-delivery dip at the
+  150 ms margin while the controller holds the typical 10 s low at the target. Measuring against
+  the level just before a dip keeps a slow drift of the buffer from deepening old dips. Raises
+  apply as soon as one depth is known, including the bucket in progress. A trim needs 18 covered
+  depths (3 minutes), 3 minutes since the last change and a 25 ms difference, and it goes
+  straight to the recommendation. The user floor is never undercut.
+- **Stall response**: a stall provisionally adds 250 ms (cap 1500 ms) and re-arms the window.
+  The measured depths survive it; only the level restarts, and a new source clears everything.
+  After a normal-delivery stall the raised reserve is kept, and trims are held for 20 minutes.
 - **Abnormal delivery**: `TwitchDeliveryProgress` flags a media request that goes more than
-  250 ms without bytes (`ABNORMAL_BYTE_GAP_MS`), including the first-byte wait. So do confirmed
-  timeout, DNS, connection/no-route errors and HTTP 401/403/429/5xx failures. A stall during an
-  abnormal delivery or within 15 s after one keeps no bump. Buffer lows from the gap's start until
-  15 s after its end are not measured. Samples are committed 350 ms late so that the undetected
-  first 250 ms of a gap is dropped too. Request age alone, generic EOF and prefetch 404 are not
-  abnormal. Delayed playlist responses with no media request in flight are not detected yet.
+  250 ms without bytes (`ABNORMAL_BYTE_GAP_MS`), including the first-byte wait. It also flags a
+  trickle: while it is the only media request in flight, the request delivers less than 30% of
+  the stream's usual byte rate over 500 ms, or less than 50% over 1 s. The usual rate is the
+  median of the last 5 completed media requests that lasted at least 1 s. The rates are checked
+  in 50 ms slots, and the flag starts at the start of the window that tripped it. Confirmed
+  timeout, DNS, connection/no-route errors and HTTP 401/403/429/5xx failures count as well. A
+  stall during an abnormal delivery or within 15 s after one keeps no bump. Buffer lows from the
+  abnormal delivery's start until 15 s after its end are not measured. Samples are committed
+  1150 ms late (`DETECTION_DELAY_MS` + 100 ms) so that the undetected onset is dropped too.
+  Request age alone, generic EOF and prefetch 404 are not abnormal. Delayed playlist responses
+  with no media request in flight are not detected yet.
 - **Speed output**: retains the existing 1500 ms cadence, up-to-0.01 glide, and 0.005 snap threshold;
   intermediate fractional speeds remain available. Catch-up stops immediately if instantaneous
   buffer reaches the effective cushion. The audio processor remains active at 1× to preserve continuity.
@@ -688,18 +696,19 @@ The runtime capture is `.tmp/ltb-browser/network-clock-runtime.log`.
 too**, deliberately. The per-tick heartbeat is the main data source:
 
 ```
-raw= shown= edgeDist= buf= pp= pos= ctlMin= ctlUnreadMin= unreadLow= ctlStallX= ctlLearned= lowsBuckets= lowsTypicalMs= lowsWorstMs= lowsTargetMs= ctlTrimHoldMs= abnormalGapAgoMs= ctlSpeed= target= lowLat= targetMs= origin= extraMs= speedAdj=
+raw= shown= edgeDist= buf= pp= pos= ctlMin= ctlUnreadMin= unreadLow= ctlStallX= ctlLearned= lowsBuckets= lowsLevelMs= lowsDepthMs= lowsTargetMs= ctlTrimHoldMs= abnormalAgoMs= ctlSpeed= target= lowLat= targetMs= origin= extraMs= speedAdj=
 ```
 
 `ctlMin` is the windowed minimum, `ctlUnreadMin` the same speed-corrected 10 s minimum of the
 unread video (see "September 24 stall point" below), `unreadLow` the raw unread-video minimum
 since the previous heartbeat, `ctlStallX` the current stall extra, `ctlSpeed` the controller's
-output, and `ctlLearned` the adaptive reserve in ms. `lowsBuckets` counts the covered 10 s buckets.
-`lowsTypicalMs` and `lowsWorstMs` are their median and lowest buffer lows at the current speed
-trajectory. `lowsTargetMs` is the recommended cushion, -1 until 3 buckets are covered.
+output, and `ctlLearned` the adaptive reserve in ms. `lowsBuckets` counts the covered 10 s
+buckets with a measured depth. `lowsLevelMs` is the current level at the current speed trajectory,
+-1 while fewer than 3 buckets back it. `lowsDepthMs` is the deepest depth in the last 20 minutes
+and `lowsTargetMs` the recommended cushion, both -1 until a depth is known.
 `ctlTrimHoldMs` is the time left before trims resume after a normal-delivery stall.
-`abnormalGapAgoMs` is the age of the latest abnormal byte gap, 0 while one is ongoing and -1 if
-none has happened. `target` is the Media3 base target
+`abnormalAgoMs` is the age of the latest abnormal delivery, byte gap or trickle, 0 while one is
+ongoing and -1 if none has happened. `target` is the Media3 base target
 (user floor in this mode), `targetMs` the user setting, and `target + ctlStallX` the effective
 cushion. `extraMs` records the initial origin estimate and must not be added again. Event lines carry a `p<slot>`
 prefix:
@@ -708,7 +717,8 @@ prefix:
   correlate a stall with media request progress and playlist completion. No media request in flight
   can also mean delayed playlist discovery; it does not establish a local renderer fault.
 - `STALL-RECOVERED durMs= ignoredForLearning= learnedMs=`
-- `DELIVERY-END deliveryId= request= media= outcome= durationMs= openMs= firstByteMs= bytes= maxByteGapMs= maxReadWaitMs=`
+- `DELIVERY-END deliveryId= request= media= outcome= durationMs= openMs= firstByteMs= bytes= maxByteGapMs= maxReadWaitMs= slowMs=`
+  — `slowMs` is how long the request was flagged as a trickle.
 - `LOAD-RETRY`, `LOAD-COMPLETED (SLOW-LOAD >4s)`, `LOAD-CANCELED`, `LOAD-ERROR`
 - `AUDIO-UNDERRUN bufMs= sinceFeedMs=` — the audio path starving, which is *not* a buffer
   underrun and has a different cause.
@@ -721,8 +731,8 @@ prefix:
 
 `TwitchProgressDataSource` wraps live HLS reads and feeds a per-source `TwitchDeliveryProgress`.
 Heartbeat and stall snapshots include `deliveryId`, `mediaRequests`, `mediaBytes` (sum on active
-requests), `mediaNoByteMs`, `mediaReadWaitMs` and `mediaOpenWaitMs` (maxima across active media
-requests; -1 means unavailable). `.ts`, `.m4s` and `.mp4` paths count as media; other paths still
+requests), `mediaNoByteMs`, `mediaReadWaitMs`, `mediaOpenWaitMs` and `mediaSlowMs` (maxima across
+active media requests; -1 means unavailable; `mediaSlowMs` is the age of an ongoing trickle). `.ts`, `.m4s` and `.mp4` paths count as media; other paths still
 emit completion records. No URL/token is included in the added completion record.
 
 `DELIVERY-END` records first-byte/open delay and maximum blocked-read duration, plus gaps between
@@ -797,10 +807,13 @@ cushion trimmed to 337 ms. Of the day's 1333 ms of raises, 413 ms came from this
 
 The 150 ms margin, the 20-minute memory, the 3-minute trim spacing, the 20-minute hold after a
 normal-delivery stall and the 250 ms byte-gap cut-off are first choices. They are calibrated
-against one evening of `eun12` playback with the video output-gap grace active. Any stall
-re-arms the window and clears the lows, so the memory is effectively shorter around stalls. The
-sizing never goes below the user setting (`ll_target`), so a floor above the recommendation
-decides the cushion by itself.
+against one evening of `eun12` playback with the video output-gap grace active. The trickle
+thresholds come from the September 26–27 heartbeats. On the `eun12` evening they fired about 2.4
+times per hour and would have flagged all four trickle stalls. On September 26's `eun11` they
+fired about 0.6 times per hour. Those heartbeats only sample the byte count every 500 ms, so the
+50 ms slots may fire somewhat more often. After a stall the level needs 3 covered buckets again,
+so no new depths are measured for about 30 s. The sizing never goes below the user setting
+(`ll_target`), so a floor above the recommendation decides the cushion by itself.
 
 
 ## September 19 measurement and recovery state
