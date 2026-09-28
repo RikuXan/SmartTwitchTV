@@ -10,7 +10,7 @@ public class TwitchBufferLowsTest {
     private long now;
 
     private void hold(long durationMs, long bufferUs, long advanceUs) {
-        for (long end = now + durationMs; now < end; now += 10) lows.sample(now, bufferUs, advanceUs);
+        for (long end = now + durationMs; now < end; now += 10) lows.sample(now, bufferUs, advanceUs, TwitchDeliveryProgress.BASE_DETECTION_DELAY_MS);
     }
 
     @Test public void needsThreeLevelBucketsBeforeRecommending() {
@@ -43,7 +43,7 @@ public class TwitchBufferLowsTest {
     @Test public void excludedDeliveryIncludingItsUndetectedOnsetDoesNotCount() {
         hold(60000, 400000, 0);
         long abnormalStartMs = now;
-        hold(TwitchDeliveryProgress.DETECTION_DELAY_MS, 150000, 0);
+        hold(TwitchDeliveryProgress.BASE_DETECTION_DELAY_MS, 150000, 0);
         lows.exclude(abnormalStartMs, now + 40);
         hold(40, 150000, 0);
         hold(60000, 400000, 0);

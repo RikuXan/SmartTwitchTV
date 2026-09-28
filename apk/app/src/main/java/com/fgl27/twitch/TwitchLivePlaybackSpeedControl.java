@@ -144,7 +144,8 @@ public final class TwitchLivePlaybackSpeedControl implements LivePlaybackSpeedCo
             TwitchDeliveryProgress source = delivery;
             long abnormalEndMs = source != null ? source.lastAbnormalDeliveryMs() : -1;
             if (abnormalEndMs >= 0) lows.exclude(source.lastAbnormalDeliveryStartMs(), abnormalEndMs);
-            lows.sample(nowMs, bufferedDurationUs, Math.round(playbackAdvanceUs));
+            lows.sample(nowMs, bufferedDurationUs, Math.round(playbackAdvanceUs),
+                source != null ? source.detectionDelayMs() : TwitchDeliveryProgress.BASE_DETECTION_DELAY_MS);
         }
         if (lastSizingMs == C.TIME_UNSET || nowMs - lastSizingMs >= SIZING_INTERVAL_MS) {
             lastSizingMs = nowMs;

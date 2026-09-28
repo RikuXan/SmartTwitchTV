@@ -582,18 +582,27 @@ current slot after preview promotion; older traces retain creation-slot labels.
 - **Stall response**: a stall provisionally adds 250 ms (cap 1500 ms) and re-arms the window.
   The measured depths survive it; only the level restarts, and a new source clears everything.
   After a normal-delivery stall the raised reserve is kept, and trims are held for 20 minutes.
-- **Abnormal delivery**: `TwitchDeliveryProgress` flags a media request that goes more than
-  250 ms without bytes (`ABNORMAL_BYTE_GAP_MS`), including the first-byte wait. It also flags a
-  trickle: while it is the only media request in flight, the request delivers less than 30% of
-  the stream's usual byte rate over 500 ms, or less than 50% over 1 s. The usual rate is the
-  median of the last 5 completed media requests that lasted at least 1 s. The rates are checked
-  in 50 ms slots, and the flag starts at the start of the window that tripped it. Confirmed
-  timeout, DNS, connection/no-route errors and HTTP 401/403/429/5xx failures count as well. A
-  stall during an abnormal delivery or within 15 s after one keeps no bump. Buffer lows from the
-  abnormal delivery's start until 15 s after its end are not measured. Samples are committed
-  1150 ms late (`DETECTION_DELAY_MS` + 100 ms) so that the undetected onset is dropped too.
-  Request age alone, generic EOF and prefetch 404 are not abnormal. Delayed playlist responses
-  with no media request in flight are not detected yet.
+- **Abnormal delivery**: `TwitchDeliveryProgress` learns each stream's normal delivery from its
+  last 20 completed media requests that lasted at least 1 s. The pause limit is
+  `max(250 ms, 3.5 × median of those requests' longest pause)`, and 250 ms until 5 requests have
+  completed. With fewer, one slow startup request put a US stream's limit at 1491 ms. That is about 560 ms on US origins, whose requests normally pause for about
+  280 or 420 ms, and 250 ms on EU origins. A media request that goes longer than the pause limit
+  without bytes, including the first-byte wait, is abnormal. So is a confirmed trickle.
+  - **Flagging a trickle**: while it is the only media request in flight, the request delivers
+    less than 30% of the stream's usual byte rate over a short window, or less than 50% over a long
+    one. The usual rate is the median of the last 5 requests. The windows are 500 ms and 1 s
+    scaled by pause limit / 250 ms (at most 3×) and checked in 50 ms slots.
+  - **Confirming it**: a low-rate window counts only once the request catches up to 90% of the
+    usual rate since the window started, or finishes later than the stream's median request
+    duration plus the pause limit. A quiet, low-bitrate scene does neither.
+  - **Consequences**: confirmed timeout, DNS, connection/no-route errors and HTTP
+    401/403/429/5xx failures count as well. A stall during an abnormal delivery or within 15 s
+    after one keeps no bump. Buffer lows from the abnormal delivery's start until 15 s after its
+    end are not measured. Samples are committed two long windows plus 150 ms late
+    (`detectionDelayMs()` + 100 ms, 2150 ms at the base scale) so that the undetected onset and
+    the confirmation delay are covered.
+  - **Not abnormal**: request age alone, generic EOF and prefetch 404. Delayed playlist responses
+    with no media request in flight are not detected yet.
 - **Speed output**: retains the existing 1500 ms cadence, up-to-0.01 glide, and 0.005 snap threshold;
   intermediate fractional speeds remain available. Catch-up stops immediately if instantaneous
   buffer reaches the effective cushion. The audio processor remains active at 1× to preserve continuity.
@@ -717,8 +726,9 @@ prefix:
   correlate a stall with media request progress and playlist completion. No media request in flight
   can also mean delayed playlist discovery; it does not establish a local renderer fault.
 - `STALL-RECOVERED durMs= ignoredForLearning= learnedMs=`
-- `DELIVERY-END deliveryId= request= media= outcome= durationMs= openMs= firstByteMs= bytes= maxByteGapMs= maxReadWaitMs= slowMs=`
-  — `slowMs` is how long the request was flagged as a trickle.
+- `DELIVERY-END deliveryId= request= media= outcome= durationMs= openMs= firstByteMs= bytes= maxByteGapMs= maxReadWaitMs= lowRateMs= slowMs=`
+  — `lowRateMs` is how long the request ran below the trickle thresholds, `slowMs` how much of
+  that was confirmed as a trickle.
 - `LOAD-RETRY`, `LOAD-COMPLETED (SLOW-LOAD >4s)`, `LOAD-CANCELED`, `LOAD-ERROR`
 - `AUDIO-UNDERRUN bufMs= sinceFeedMs=` — the audio path starving, which is *not* a buffer
   underrun and has a different cause.
@@ -731,8 +741,9 @@ prefix:
 
 `TwitchProgressDataSource` wraps live HLS reads and feeds a per-source `TwitchDeliveryProgress`.
 Heartbeat and stall snapshots include `deliveryId`, `mediaRequests`, `mediaBytes` (sum on active
-requests), `mediaNoByteMs`, `mediaReadWaitMs`, `mediaOpenWaitMs` and `mediaSlowMs` (maxima across
-active media requests; -1 means unavailable; `mediaSlowMs` is the age of an ongoing trickle). `.ts`, `.m4s` and `.mp4` paths count as media; other paths still
+requests), `mediaNoByteMs`, `mediaReadWaitMs`, `mediaOpenWaitMs` and `mediaLowRateMs` (maxima
+across active media requests; -1 means unavailable; `mediaLowRateMs` is the age of an ongoing,
+not yet confirmed low-rate stretch), and `pauseLimitMs`, the stream's current pause limit. `.ts`, `.m4s` and `.mp4` paths count as media; other paths still
 emit completion records. No URL/token is included in the added completion record.
 
 `DELIVERY-END` records first-byte/open delay and maximum blocked-read duration, plus gaps between
@@ -828,10 +839,13 @@ because the 420 ms pauses make up about 4% of requests.
 The 150 ms margin, the 20-minute memory, the 3-minute trim spacing, the 20-minute hold after a
 normal-delivery stall and the 250 ms byte-gap cut-off are first choices. They are calibrated
 against one evening of `eun12` playback with the video output-gap grace active. The trickle
-thresholds come from the September 26–27 heartbeats. On the `eun12` evening they fired about 2.4
-times per hour and would have flagged all four trickle stalls. On September 26's `eun11` they
-fired about 0.6 times per hour. Those heartbeats only sample the byte count every 500 ms, so the
-50 ms slots may fire somewhat more often. After a stall the level needs 3 covered buckets again,
+thresholds come from the September 26–27 heartbeats. The 3.5× pause factor comes from about
+45 minutes of US-origin and 20 minutes of `euc11` playback on September 28. Replayed on
+those requests, it flagged 0% of US requests (instead of 8.4%), 1.8% of `euc11` requests
+(instead of 6.7%) and kept both September 27 `eun12` stalls with 502 and 602 ms pauses abnormal.
+A factor of 4 would have put `eun11`'s limit at about 330 ms, just under the shortest abnormal
+pause seen there (338 ms). The trickle confirmation is not replayed; heartbeats only sample the
+byte count every 500 ms. After a stall the level needs 3 covered buckets again,
 so no new depths are measured for about 30 s. The sizing never goes below the user setting
 (`ll_target`), so a floor above the recommendation decides the cushion by itself.
 

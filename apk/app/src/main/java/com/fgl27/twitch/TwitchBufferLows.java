@@ -12,9 +12,9 @@ final class TwitchBufferLows {
     private static final int MIN_TRIM_BUCKETS = 18;
     private static final long MIN_COVERED_MS = BUCKET_MS / 2;
     private static final long MAX_SAMPLE_GAP_MS = 1000;
-    private static final long COMMIT_DELAY_MS = TwitchDeliveryProgress.DETECTION_DELAY_MS + 100;
+    private static final long COMMIT_MARGIN_MS = 100;
     private static final long EXCLUSION_AFTER_MS = 15000;
-    private static final int PENDING = 512;
+    private static final int PENDING = 1024;
 
     private final long[] depthUs = new long[BUCKETS];
     private final long[] depthBucket = new long[BUCKETS];
@@ -56,14 +56,14 @@ final class TwitchBufferLows {
         excludeUntilMs = Math.max(excludeUntilMs, toMs + EXCLUSION_AFTER_MS);
     }
 
-    synchronized void sample(long nowMs, long bufferUs, long advanceUs) {
+    synchronized void sample(long nowMs, long bufferUs, long advanceUs, long detectionDelayMs) {
         latestBucket = Math.max(latestBucket, nowMs / BUCKET_MS);
         if (pendingCount == PENDING) commitOldest();
         int tail = (pendingHead + pendingCount) % PENDING;
         pendingAtMs[tail] = nowMs;
         pendingUs[tail] = bufferUs + advanceUs;
         pendingCount++;
-        while (pendingCount > 0 && nowMs - pendingAtMs[pendingHead] >= COMMIT_DELAY_MS) commitOldest();
+        while (pendingCount > 0 && nowMs - pendingAtMs[pendingHead] >= detectionDelayMs + COMMIT_MARGIN_MS) commitOldest();
     }
 
     synchronized long recommendedTargetUs() {
