@@ -803,6 +803,26 @@ the level it had when it happened, so median − worst grows. From 21:36 to 22:0
 from 425 to 501 ms in 25 ms steps with no deeper dip. At 22:05 the 21:35 dip left the window and the
 cushion trimmed to 337 ms. Of the day's 1333 ms of raises, 413 ms came from this creep.
 
+### Local depths and trickle detection
+
+Installed September 27 at 23:05 (PID 12031); four app runs through September 28 gave 2.2 h of
+live playback. On `eun12` (1.2 h) the median LTB was 458 ms, the buffer 416 ms and the cushion
+295 ms, with no normal-delivery stall. All three stalls there were ignored correctly: two came
+during flagged trickles, and one was a 3.7 s stall behind a playlist request that hung for 6 s
+before failing with an HTTP error. The cushion no longer crept. It held 393 ms for 20 minutes
+after a 243 ms dip, then trimmed to 295 ms, and the ignored stalls did not reset it. Of five
+trickle flags, three matched real buffer drops of 530–640 ms.
+
+The fixed thresholds do not fit other origins. On US origins (`usw22`, `usw24`, `use23`), a
+media request normally pauses for about 280 or 420 ms, two or three round trips of about 140 ms,
+and never longer than 447 ms in about 1550 requests. 8–9% of their requests exceed the 250 ms
+byte gap, which predates this build, and the trickle rule flags another 4–6%. On `euc11`, which has 4 s segments,
+the trickle rule flagged 6% of requests with little buffer movement. On those streams an
+abnormal flag arrives every 20–30 s. Together with the 15 s exclusion, it keeps the measurement
+off most of the time and ignores every stall, so the cushion stays at the origin estimate. A
+relative limit of 1.5 × the 95th percentile of the last 50 requests only halves the US flags,
+because the 420 ms pauses make up about 4% of requests.
+
 ## Remaining limits of cushion adaptation
 
 The 150 ms margin, the 20-minute memory, the 3-minute trim spacing, the 20-minute hold after a
