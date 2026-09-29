@@ -834,6 +834,26 @@ off most of the time and ignores every stall, so the cushion stays at the origin
 relative limit of 1.5 × the 95th percentile of the last 50 requests only halves the US flags,
 because the 420 ms pauses make up about 4% of requests.
 
+### Pauses come from upstream, and their rate varies by day
+
+A September 29 experiment (`exp/shadow-segment-download`, abandoned) downloaded every segment a
+second time on its own connection. Of 33 player pauses over 290 ms, the second connection paused at the same time and for
+the same length in 32, on all four addresses of each of two CloudFront sites. The pauses start
+upstream of the CDN, so a second connection or another edge cannot avoid them.
+
+Comparing days by media requests with a pause over 290 ms:
+
+| | long pauses | stalls | stalled, by load-start buffer minus pause: <0 / 0–100 / 100–200 / ≥200 ms |
+| --- | --- | --- | --- |
+| Sep 26 `eun11`, old sizing (5.9 h, buffer 387 ms) | 2.2/h | 1.9/h | 5/5, 4/7, 0/1, 0/0 |
+| Sep 27 `eun12`, old sizing (7.1 h, 533 ms) | 2.1/h | 1.8/h | 2/2, 4/7, 0/3, 0/3 |
+| Sep 29 `eun11`, per-stream limits (4.0 h, 419 ms) | 6.0/h | 2.8/h | 4/4, 4/10, 0/9, 0/1 |
+| Sep 29 `eun11`, with shadow (3.8 h, 449 ms) | 8.8/h | 4.7/h | 10/10, 5/13, 0/5, 0/6 |
+
+A pause stalls when it is longer than the buffer, about half the time when it is shorter by less
+than 100 ms, and never with more room, in every build. The September 29 stall rate follows three
+to four times as many long pauses, not a change in how they turn into stalls.
+
 ## Remaining limits of cushion adaptation
 
 The 150 ms margin, the 20-minute memory, the 3-minute trim spacing, the 20-minute hold after a
