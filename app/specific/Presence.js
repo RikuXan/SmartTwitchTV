@@ -79,9 +79,8 @@ var Presence_playSessions = {};
 var Presence_minutes = {};
 var Presence_watchDueAt = {};
 var Presence_deviceId = null;
-var Presence_positionMs = 0;
 var Presence_vodDueAt = 0;
-var Presence_vodId = null;
+var Presence_vodKey = null;
 //The Java bridge types the callback key as long, so requests are correlated by this sequence instead
 var Presence_seq = 0;
 var Presence_pending = {};
@@ -131,11 +130,19 @@ function Presence_WatchedChannels() {
     var list = [],
         i = 0;
 
-    if (!Play_isOn || Main_isStopped || PlayVod_isOn || PlayClip_isOn || !AddUser_UserIsSet()) return list;
+    if (Main_isStopped || PlayClip_isOn || !AddUser_UserIsSet()) return list;
+
+    if (PlayExtraVod_Side() === 0) {
+        Presence_AddChannel(list, PlayExtra_data);
+
+        return list;
+    }
+
+    if (!Play_isOn || PlayVod_isOn) return list;
 
     Presence_AddChannel(list, Play_data);
 
-    if (PlayExtra_PicturePicture) Presence_AddChannel(list, PlayExtra_data);
+    if (PlayExtra_PicturePicture && !PlayExtraVod_InPP) Presence_AddChannel(list, PlayExtra_data);
 
     if (Play_MultiEnable) {
         for (; i < Play_MultiArray_length; i++) {
@@ -192,6 +199,8 @@ function Presence_Tick() {
                 AddUser_UserIsSet() +
                 ' pip=' +
                 PlayExtra_PicturePicture +
+                ' vodSide=' +
+                PlayExtraVod_Side() +
                 ' multi=' +
                 Play_MultiEnable
         );
@@ -223,34 +232,45 @@ function Presence_Tick() {
     Main_setTimeout(Presence_Tick, Presence_tickMs);
 }
 
+function Presence_PlayingVod() {
+    if (PlayVod_isOn) return {id: Main_values.ChannelVod_vodId, slot: 0, positionMs: OSInterface_gettime()};
+
+    if (PlayExtraVod_Side() === 1) return {id: PlayExtraVod_Store.vodId, slot: 1, positionMs: OSInterface_gettimePP()};
+
+    return null;
+}
+
 function Presence_Vod(now) {
-    if (!PlayVod_isOn || Main_isStopped || !AddUser_UserIsSet()) {
-        Presence_vodId = null;
+    var vod = Main_isStopped || !AddUser_UserIsSet() ? null : Presence_PlayingVod();
+
+    if (!vod || !vod.id) {
+        Presence_vodKey = null;
         return;
     }
 
-    var vodId = Main_values.ChannelVod_vodId;
-    var position = Math.floor(Presence_positionMs / 1000);
+    var key = vod.id + '@' + vod.slot;
 
-    if (!vodId || position < 1) return;
-
-    if (vodId !== Presence_vodId) {
-        Presence_vodId = vodId;
-        Presence_vodDueAt = 0;
-        OSInterface_PresenceLog('watching vod=' + vodId);
+    //The bridged positions lag a window switch by up to half a second and still report the other player
+    if (key !== Presence_vodKey) {
+        Presence_vodKey = key;
+        Presence_vodDueAt = now + Presence_tickMs;
+        OSInterface_PresenceLog('watching vod=' + vod.id + ' slot=' + vod.slot);
+        return;
     }
 
-    if (now < Presence_vodDueAt) return;
+    var position = Math.floor(vod.positionMs / 1000);
+
+    if (now < Presence_vodDueAt || position < 1) return;
 
     Presence_vodDueAt = now + Presence_tickMs;
 
     Presence_Post(
-        vodId,
+        vod.id,
         'vod',
         Presence_vodMessage
             .replace('%u', AddUser_UsernameArray[0].id)
             .replace('%p', position)
-            .replace('%v', vodId)
+            .replace('%v', vod.id)
     );
 }
 
