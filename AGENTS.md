@@ -428,6 +428,7 @@ feat/presence                   merged — channel points, drops, watch streaks,
 feat/pip-vod                    merged, complete — a VOD in the picture in picture player
  └ fix/pip-vod-chat-resume        merged — vod chat restarts after pause and seek when the vod came from the pair
 fix/vod-chat-end-of-chat        merged — vod chat retries failed loads and keeps the end-of-chat page
+fix/presence-pip-vod            merged — presence in a vod and live pair; replay after feat/presence and feat/pip-vod
 feat/low-latency-core           merged — the controller, the cushion setting, the speed gate
  ├ exp/audio-pitch-follows-speed  NOT merged — evaluated alternative to time stretching, then reverted
  ├ feat/audio-signalsmith         merged — Signalsmith Stretch vendored, JNI bridge, renderer wiring
