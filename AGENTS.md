@@ -393,6 +393,12 @@ Things that are easy to break:
   than caching once per channel.
 - The inventory sweep runs whatever is playing, and an empty inventory is a valid answer, not a
   failure to retry.
+- In a VOD and live pair only the live window is a watched channel, and `PlayExtraVod_Side()`
+  decides which one that is. A VOD cell carries its creator at index 14 exactly like a live one,
+  and `Play_data` still holds the replaced stream while a VOD is the big player, so neither can be
+  read blindly. The VOD reports through `updateUserViewedVideo` from whichever window holds it,
+  with its position from `gettime` / `gettimePP`, never from `Play_ShowVideoStatus`, which only
+  runs while the status overlay or the VOD panel is open.
 
 `OSInterface_PresenceLog` sends every ping to `TwitchDiagnosticLog`, so
 `adb logcat -s TwitchLL | grep presence` shows the whole loop. That gating differs by branch — see
