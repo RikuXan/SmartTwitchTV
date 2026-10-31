@@ -131,11 +131,19 @@ function Presence_WatchedChannels() {
     var list = [],
         i = 0;
 
-    if (!Play_isOn || Main_isStopped || PlayVod_isOn || PlayClip_isOn || !AddUser_UserIsSet()) return list;
+    if (Main_isStopped || PlayClip_isOn || !AddUser_UserIsSet()) return list;
+
+    if (PlayExtraVod_Side() === 0) {
+        Presence_AddChannel(list, PlayExtra_data);
+
+        return list;
+    }
+
+    if (!Play_isOn || PlayVod_isOn) return list;
 
     Presence_AddChannel(list, Play_data);
 
-    if (PlayExtra_PicturePicture) Presence_AddChannel(list, PlayExtra_data);
+    if (PlayExtra_PicturePicture && !PlayExtraVod_InPP) Presence_AddChannel(list, PlayExtra_data);
 
     if (Play_MultiEnable) {
         for (; i < Play_MultiArray_length; i++) {
@@ -192,6 +200,8 @@ function Presence_Tick() {
                 AddUser_UserIsSet() +
                 ' pip=' +
                 PlayExtra_PicturePicture +
+                ' vodSide=' +
+                PlayExtraVod_Side() +
                 ' multi=' +
                 Play_MultiEnable
         );
