@@ -382,6 +382,9 @@ function PlayExtraVod_SwitchToLiveMain() {
 
     PlayVod_SaveOffset();
 
+    //Chat_Clear spares the small window's live chat only while PlayExtraVod_InPP still says the vod is the main one
+    Chat_Clear();
+
     if (Main_IsOn_OSInterface) OSInterface_mSwitchPlayer();
 
     Play_data = live;
@@ -394,8 +397,7 @@ function PlayExtraVod_SwitchToLiveMain() {
 
     PlayExtraVod_SwapVolumes();
 
-    Chat_Clear();
-    ChatLive_Close(1);
+    if (!Main_values.Play_ChatForceDisable) ChatLive_Switch();
     PlayExtraVod_HideSmallChat();
 
     PlayExtraVod_EnterLiveMain();
@@ -403,7 +405,7 @@ function PlayExtraVod_SwitchToLiveMain() {
     Main_innerHTML('chat_container_name_text0', STR_SPACE_HTML + Play_data.data[1] + STR_SPACE_HTML);
     Main_innerHTML('chat_container_name_text1', STR_SPACE_HTML + store.channelName + STR_SPACE_HTML);
 
-    if (!Main_values.Play_ChatForceDisable) ChatLive_Init(0);
+    if (!Main_values.Play_ChatForceDisable && !Chat_Id[0]) ChatLive_Init(0);
 }
 
 function PlayExtraVod_SwitchToVodMain() {
@@ -419,7 +421,7 @@ function PlayExtraVod_SwitchToVodMain() {
 
     PlayExtraVod_SwapVolumes();
 
-    ChatLive_Close(0);
+    if (!Main_values.Play_ChatForceDisable) ChatLive_Switch();
     ChatLive_Clear(0);
 
     PlayExtraVod_EnterVodMain();
@@ -428,10 +430,8 @@ function PlayExtraVod_SwitchToVodMain() {
     Main_innerHTML('chat_container_name_text1', STR_SPACE_HTML + PlayExtra_data.data[1] + STR_SPACE_HTML);
 
     if (!Main_values.Play_ChatForceDisable) {
-        if (!Play_isFullScreen) {
-            PlayExtra_ShowChat();
-            ChatLive_Init(1);
-        }
+        if (!Play_isFullScreen) PlayExtra_ShowChat();
+        if (!Chat_Id[1]) ChatLive_Init(1);
 
         Chat_offset = PlayExtraVod_Store.position;
         Chat_Init();

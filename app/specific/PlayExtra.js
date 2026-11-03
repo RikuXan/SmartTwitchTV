@@ -158,9 +158,9 @@ function PlayExtra_loadDataSuccessEnd(playlist, PreventCleanQualities) {
     Play_SetAudioIcon();
     PlayExtra_data.playlist = playlist;
     PlayExtra_SetPanel();
+    ChatLive_Init(1);
 
     if (!Play_isFullScreen) {
-        ChatLive_Init(1);
         OSInterface_mupdatesizePP(Play_isFullScreen);
         PlayExtra_ShowChat();
         Play_SetChatSideBySide();
@@ -218,11 +218,13 @@ function PlayExtra_SwitchPlayer() {
     PlayExtra_SwitchPlayerResStoreOld();
     Main_SaveValues();
 
-    Play_UpdateMainStream(Play_isFullScreen, false);
+    Play_UpdateMainStream(false, false);
     PlayExtra_UpdatePanel();
 
-    if (!Play_isFullScreen) {
+    if (!Main_values.Play_ChatForceDisable) {
         ChatLive_Switch();
+        if (!Chat_Id[0]) ChatLive_Init(0);
+        if (!Chat_Id[1]) ChatLive_Init(1);
     }
 
     Main_innerHTML('chat_container_name_text1', STR_SPACE_HTML + PlayExtra_data.data[1] + STR_SPACE_HTML);

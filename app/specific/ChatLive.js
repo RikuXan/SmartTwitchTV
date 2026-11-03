@@ -20,6 +20,7 @@
 
 //Variable initialization
 var Chat_Id = [];
+var ChatLive_LastId = 0;
 var ChatLive_loadBadgesChannelId;
 var ChatLive_socket = [];
 var ChatLive_loaded = [];
@@ -145,23 +146,104 @@ function ChatLive_Init(chat_number, SkipClear) {
     }
 }
 
+function ChatLive_Slot(id) {
+    if (!id) return -1;
+    if (id === Chat_Id[0]) return 0;
+    if (id === Chat_Id[1]) return 1;
+
+    return -1;
+}
+
 function ChatLive_Switch() {
-    var innerHTMLTemp = Chat_div[1].innerHTML;
+    //Every per chat array belongs here, one left out stays with the window instead of moving with its stream
+    var perChat = [
+            Chat_Id,
+            ChatLive_socket,
+            ChatLive_loaded,
+            ChatLive_CheckId,
+            ChatLive_JoinID,
+            ChatLive_LineAddCounter,
+            ChatLive_Messages,
+            ChatLive_Banned,
+            ChatLive_FollowState,
+            ChatLive_SubState,
+            extraEmotes,
+            ChatLive_sharedChannelBadgeLoaded,
+            ChatLive_selectedChannel_id,
+            ChatLive_selectedChannel,
+            ChatLive_isShared,
+            ChatLive_SharedShowedWarning,
+            ChatLive_loadChattersId,
+            ChatLive_StartSharedId,
+            ChatLive_PingId,
+            ChatLive_Individual_Background_flip,
+            ChatLive_Channel_Regex_Search,
+            ChatLive_Channel_Regex_Replace,
+            useToken,
+            ChatLive_RoomState,
+            ChatLive_Latency
+        ],
+        i,
+        j,
+        temp;
 
-    Chat_div[1].innerHTML = Chat_div[0].innerHTML;
-    Chat_div[0].innerHTML = innerHTMLTemp;
-
-    var logged0 = Main_getElementById('chat_loggedin0'),
-        logged1 = Main_getElementById('chat_loggedin1');
-
-    innerHTMLTemp = logged1.innerHTML;
-    logged1.innerHTML = logged0.innerHTML;
-    logged0.innerHTML = innerHTMLTemp;
-
-    for (var i = 0; i < 2; i++) {
-        ChatLive_Close(i);
-        ChatLive_Init(i, true);
+    for (i = 0; i < perChat.length; i++) {
+        temp = perChat[i][0];
+        perChat[i][0] = perChat[i][1];
+        perChat[i][1] = temp;
     }
+
+    for (i = 0; i < 2; i++) {
+        if (!ChatLive_Messages[i]) continue;
+
+        for (j = 0; j < ChatLive_Messages[i].length; j++) {
+            ChatLive_Messages[i][j].chat_number = i;
+        }
+    }
+
+    ChatLive_SwapChildren(Chat_div[0], Chat_div[1]);
+    ChatLive_RemoveAnimation(0);
+    ChatLive_RemoveAnimation(1);
+    ChatLive_SwitchChatters();
+
+    ChatLive_SendClose();
+    if (Chat_Id[0]) ChatLive_SendStart(0, Chat_Id[0]);
+}
+
+function ChatLive_SwapChildren(first, second) {
+    var fragment = document.createDocumentFragment();
+
+    while (first.firstChild) fragment.appendChild(first.firstChild);
+    while (second.firstChild) first.appendChild(second.firstChild);
+
+    second.appendChild(fragment);
+}
+
+function ChatLive_SwitchChatters() {
+    var logged0 = Main_getElementById('chat_loggedin0'),
+        logged1 = Main_getElementById('chat_loggedin1'),
+        holder0 = Main_getElementById('chat_box_holder0'),
+        holder1 = Main_getElementById('chat_box_holder1'),
+        temp = logged1.innerHTML;
+
+    logged1.innerHTML = logged0.innerHTML;
+    logged0.innerHTML = temp;
+
+    temp = logged1.className;
+    logged1.className = logged0.className;
+    logged0.className = temp;
+
+    temp = holder1.style.height;
+    holder1.style.height = holder0.style.height;
+    holder0.style.height = temp;
+
+    Main_getElementById('chat_container_name0').style.top = Main_A_includes_B(logged0.className, 'hide') ? '' : '3vh';
+}
+
+function ChatLive_RemoveAnimation(chat_number) {
+    var lines = Chat_div[chat_number].getElementsByClassName('chat_line_animation');
+
+    while (lines.length) lines[0].classList.remove('chat_line_animation');
 }
 
 var ChatLive_Show_Shared_Badge;
@@ -238,7 +320,9 @@ function ChatLive_SetOptions(chat_number, Channel_id, selectedChannel) {
         ChatLive_User_Regex_Replace = new RegExp('@' + AddUser_UsernameArray[0].name, 'gi');
     }
 
-    Chat_Id[chat_number] = new Date().getTime();
+    //ChatLive_Slot finds a chat by its id, so the two chats must never share one
+    ChatLive_LastId = Math.max(new Date().getTime(), ChatLive_LastId + 1);
+    Chat_Id[chat_number] = ChatLive_LastId;
 
     ChatLive_sharedChannelBadgeLoaded[chat_number] = {};
 
@@ -266,12 +350,16 @@ function ChatLive_StartShared(chat_number, id) {
 }
 
 function ChatLive_checkShared(chat_number, id) {
+    chat_number = ChatLive_Slot(id);
+    if (chat_number < 0) return;
+
     var theUrl = Main_helix_api + 'shared_chat/session?broadcaster_id=' + ChatLive_selectedChannel_id[chat_number];
     BaseXmlHttpGet(theUrl, ChatLive_checkSharedSuccess, noop_fun, chat_number, id, true);
 }
 
 function ChatLive_checkSharedSuccess(responseText, chat_number, id) {
-    if (id !== Chat_Id[chat_number]) return;
+    chat_number = ChatLive_Slot(id);
+    if (chat_number < 0) return;
 
     var response = JSON.parse(responseText);
 
@@ -319,7 +407,8 @@ function ChatLive_updateBanner(channelsIds, chat_number, id) {
 }
 
 function ChatLive_updateBannerSuccess(responseText, chat_number, id) {
-    if (id !== Chat_Id[chat_number]) return;
+    chat_number = ChatLive_Slot(id);
+    if (chat_number < 0) return;
 
     var response = JSON.parse(responseText);
 
@@ -364,7 +453,8 @@ function ChatLive_checkFallow(chat_number, id) {
 }
 
 function ChatLive_checkFallowSuccess(responseText, chat_number, id) {
-    if (id !== Chat_Id[chat_number]) return;
+    chat_number = ChatLive_Slot(id);
+    if (chat_number < 0) return;
 
     ChatLive_checkFallowSuccessUpdate(responseText, chat_number);
 }
@@ -383,7 +473,8 @@ function ChatLive_checkFallowSuccessUpdate(responseText, chat_number) {
 }
 
 function ChatLive_RequestCheckFollowNOK(chat_number, id) {
-    if (id !== Chat_Id[chat_number]) return;
+    chat_number = ChatLive_Slot(id);
+    if (chat_number < 0) return;
 
     ChatLive_FollowState[chat_number].follows = false;
 }
@@ -409,7 +500,8 @@ function ChatLive_checkSub(chat_number, id) {
 }
 
 function ChatLive_checkSubSuccess(responseText, chat_number, id) {
-    if (id !== Chat_Id[chat_number]) return;
+    chat_number = ChatLive_Slot(id);
+    if (chat_number < 0) return;
 
     ChatLive_SubState[chat_number].state = true;
     ChatLive_loadChannelEmotes(chat_number, id);
@@ -428,17 +520,22 @@ function ChatLive_loadChannelEmotes(chat_number, id) {
 }
 
 function ChatLive_loadChannelEmotesSuccess(responseText, chat_number, chat_id) {
+    chat_number = ChatLive_Slot(chat_id);
+    if (chat_number < 0) return;
+
     ChatLive_loadTwitchEmotesSuccess(responseText, chat_number, chat_id, extraEmotesDone.ChannelEmotes[ChatLive_selectedChannel_id[chat_number]]);
 }
 
 function ChatLive_checkSubFail(chat_number, id) {
-    if (id !== Chat_Id[chat_number]) return;
+    chat_number = ChatLive_Slot(id);
+    if (chat_number < 0) return;
 
     ChatLive_SubState[chat_number].state = false;
 }
 
 function ChatLive_loadBadgesChannel(chat_number, id, input_channelId) {
-    if (id !== Chat_Id[chat_number]) return;
+    chat_number = ChatLive_Slot(id);
+    if (chat_number < 0) return;
 
     var channelId = input_channelId ? input_channelId : ChatLive_selectedChannel_id[chat_number];
 
@@ -453,7 +550,8 @@ function ChatLive_loadBadgesChannel(chat_number, id, input_channelId) {
 }
 
 function ChatLive_loadBadgesChannelSuccess(obj, id, chat_number, channelId) {
-    if (id !== Chat_Id[chat_number]) return;
+    chat_number = ChatLive_Slot(id);
+    if (chat_number < 0) return;
 
     extraEmotesDone.BadgesChannel[channelId] = Chat_loadBadgesTransform(obj, channelId, true, chat_number);
     ChatLive_sharedChannelBadgeLoaded[chat_number][channelId] = true;
@@ -501,6 +599,9 @@ function ChatLive_loadChattersCheckType(chat_number, id) {
 }
 
 function ChatLive_loadChattersCheckTypeRun(chat_number, id) {
+    chat_number = ChatLive_Slot(id);
+    if (chat_number < 0) return;
+
     if (Settings_value.show_chatters.defaultValue === 1) {
         ChatLive_loadChattersLoad(chat_number, id);
     } else {
@@ -515,8 +616,10 @@ function ChatLive_loadChattersViewers(chat_number, id) {
 }
 
 function ChatLive_loadChattersViewersSuccess(responseText, chat_number, id) {
+    chat_number = ChatLive_Slot(id);
+
     try {
-        if (id === Chat_Id[chat_number]) {
+        if (chat_number > -1) {
             var resultObj = JSON.parse(responseText);
 
             if (resultObj.data && resultObj.data.length) {
@@ -546,9 +649,11 @@ function ChatLive_loadChattersLoad(chat_number, id) {
 }
 
 function ChatLive_loadChattersSuccess(responseObj, chat_number, id) {
+    chat_number = ChatLive_Slot(id);
+
     if (responseObj.status === 200) {
         try {
-            if (id === Chat_Id[chat_number]) {
+            if (chat_number > -1) {
                 var resultObj = JSON.parse(responseObj.responseText);
                 var counter = resultObj.data.channels[0].chatters.count;
 
@@ -594,7 +699,8 @@ function ChatLive_SetTwitchEmotesSuccess(obj) {
 }
 
 function ChatLive_loadTwitchEmotesSuccess(responseText, chat_number, chat_id, extraEmotesDone_obj) {
-    if (chat_id !== Chat_Id[chat_number]) return;
+    chat_number = ChatLive_Slot(chat_id);
+    if (chat_number < 0) return;
 
     var response = JSON.parse(responseText);
 
@@ -679,7 +785,8 @@ function ChatLive_loadEmotesChannelBTTV(chat_number, id) {
 }
 
 function ChatLive_loadEmotesChannelBTTVSuccess(data, chat_number, id) {
-    if (id !== Chat_Id[chat_number]) return;
+    chat_number = ChatLive_Slot(id);
+    if (chat_number < 0) return;
 
     ChatLive_loadEmotesbttv(JSON.parse(data), chat_number, false);
 }
@@ -757,7 +864,8 @@ function ChatLive_loadCheersChannel(chat_number, id) {
 }
 
 function ChatLive_loadCheersChannelSuccess(responseText, chat_number, id) {
-    if (id !== Chat_Id[chat_number]) return;
+    chat_number = ChatLive_Slot(id);
+    if (chat_number < 0) return;
     cheers[ChatLive_selectedChannel_id[chat_number]] = {};
     var data = JSON.parse(responseText);
 
@@ -810,7 +918,8 @@ function ChatLive_loadEmotesChannelFFZ(chat_number, id) {
 }
 
 function ChatLive_loadEmotesChannelFFZSuccess(data, chat_number, id) {
-    if (id !== Chat_Id[chat_number]) return;
+    chat_number = ChatLive_Slot(id);
+    if (chat_number < 0) return;
 
     ChatLive_loadEmotesffz(JSON.parse(data), chat_number, false);
 }
@@ -904,7 +1013,8 @@ function ChatLive_loadEmotesChannelSeven_tv(chat_number, id) {
 }
 
 function ChatLive_loadEmotesChannelSeven_tvSuccess(data, chat_number, id) {
-    if (id !== Chat_Id[chat_number]) return;
+    chat_number = ChatLive_Slot(id);
+    if (chat_number < 0) return;
 
     ChatLive_loadEmotesseven_tv(JSON.parse(data), chat_number, false);
 }
@@ -1035,7 +1145,8 @@ function ChatLive_PreLoadChat(chat_number, id) {
 }
 
 function ChatLive_PreLoadChatSuccess(data, chat_number, id) {
-    if (id !== Chat_Id[chat_number]) return;
+    chat_number = ChatLive_Slot(id);
+    if (chat_number < 0) return;
 
     var obj = JSON.parse(data),
         len = obj.messages.length,
@@ -1054,7 +1165,8 @@ function ChatLive_PreLoadChatSuccess(data, chat_number, id) {
 var useToken = [];
 
 function ChatLive_loadChat(chat_number, id, SkipStartLine) {
-    if (id !== Chat_Id[chat_number]) return;
+    chat_number = ChatLive_Slot(id);
+    if (chat_number < 0) return;
 
     ChatLive_CheckClear(chat_number);
 
@@ -1080,6 +1192,9 @@ function ChatLive_loadChatRequest(chat_number, id, SkipStartLine) {
     ChatLive_socket[chat_number] = new WebSocket('wss://irc-ws.chat.twitch.tv:443', 'irc');
 
     ChatLive_socket[chat_number].onopen = function () {
+        var chat_number = ChatLive_Slot(id);
+        if (chat_number < 0) return;
+
         if (useToken[chat_number]) {
             var username = AddUser_UsernameArray[0].name.toLowerCase();
 
@@ -1095,7 +1210,8 @@ function ChatLive_loadChatRequest(chat_number, id, SkipStartLine) {
     };
 
     ChatLive_socket[chat_number].onmessage = function (data) {
-        if (!data.data) return;
+        var chat_number = ChatLive_Slot(id);
+        if (chat_number < 0 || !data.data) return;
 
         var message = window.parseIRC(data.data.trim());
 
@@ -1127,7 +1243,8 @@ function ChatLive_loadChatRequest(chat_number, id, SkipStartLine) {
                     //Delay the joing so the cap get fully accepted
                     ChatLive_JoinID[chat_number] = Main_setTimeout(
                         function () {
-                            ChatLive_socket[chat_number].send('JOIN #' + ChatLive_selectedChannel[chat_number]);
+                            var chat_number = ChatLive_Slot(id);
+                            if (chat_number > -1) ChatLive_socket[chat_number].send('JOIN #' + ChatLive_selectedChannel[chat_number]);
                         },
                         500,
                         ChatLive_JoinID[chat_number]
@@ -1176,14 +1293,15 @@ function ChatLive_loadChatRequest(chat_number, id, SkipStartLine) {
                     //On that device the onclose is automatic call after 60 seconds of inactivity
                     ChatLive_PingId[chat_number] = Main_setInterval(
                         function () {
-                            if (ChatLive_socket[chat_number] && ChatLive_socket[chat_number].readyState === 1)
+                            var chat_number = ChatLive_Slot(id);
+                            if (chat_number > -1 && ChatLive_socket[chat_number] && ChatLive_socket[chat_number].readyState === 1)
                                 ChatLive_socket[chat_number].send('PONG tmi.twitch.tv');
                         },
                         30 * 1000, //30
                         ChatLive_PingId[chat_number]
                     );
                 }
-                ChatLive_CheckRoomState(message, chat_number, true);
+                ChatLive_CheckRoomState(message, chat_number, id);
 
                 break;
             case 'USERNOTICE':
@@ -1268,6 +1386,9 @@ function ChatLive_loadChatRequest(chat_number, id, SkipStartLine) {
     };
 
     ChatLive_socket[chat_number].onclose = function (event) {
+        var chat_number = ChatLive_Slot(id);
+        if (chat_number < 0) return;
+
         //Main_Log(JSON.stringify(event) + ' onclose main ');
         ChatLive_LineAddErro('Websocket closed remotely... ' + JSON.stringify(event), chat_number);
         ChatLive_loaded[chat_number] = false;
@@ -1275,6 +1396,9 @@ function ChatLive_loadChatRequest(chat_number, id, SkipStartLine) {
     };
 
     ChatLive_socket[chat_number].onerror = function (error) {
+        var chat_number = ChatLive_Slot(id);
+        if (chat_number < 0) return;
+
         //Main_Log(JSON.stringify(error) + ' erro main');
         ChatLive_LineAddErro('Error... ' + JSON.stringify(error), chat_number);
         ChatLive_loaded[chat_number] = false;
@@ -1316,7 +1440,9 @@ function ChatLive_Close(chat_number) {
 }
 
 function ChatLive_Check(chat_number, id, timeout, silent) {
-    if (!ChatLive_loaded[chat_number] && id === Chat_Id[chat_number]) {
+    chat_number = ChatLive_Slot(id);
+
+    if (chat_number > -1 && !ChatLive_loaded[chat_number]) {
         ChatLive_Close(chat_number);
 
         ChatLive_CheckId[chat_number] = Main_setTimeout(
@@ -1343,7 +1469,7 @@ function ChatLive_CheckClear(chat_number) {
     Main_clearTimeout(ChatLive_CheckId[chat_number]);
 }
 
-function ChatLive_CheckRoomState(message, chat_number, retry) {
+function ChatLive_CheckRoomState(message, chat_number, retryId) {
     if (useToken[chat_number]) {
         //params = ["#yogscast\r\n@badge-info=;badges=;color=;display-name=fglfgl27;emote-sets=0,300374282;mod=0;subscriber=0;user-type=", "tmi.twitch.tv USERSTATE #yogscast\r\n@emote-only=0;followers-only=5;r9k=0;rituals=0;room-id=20786541;slow=0;subs-only=0 :tmi.twitch.tv ROOMSTATE #yogscast\r\n:fglfgl27.tmi.twitch.tv 353 fglfgl27 = #yogscast :fglfgl27\r\n:fglfgl27.tmi.twitch.tv 366 fglfgl27 #yogscast :End of /NAMES list"]
         var mparams = message.hasOwnProperty('params') ? JSON.stringify(message.params) : '';
@@ -1356,12 +1482,13 @@ function ChatLive_CheckRoomState(message, chat_number, retry) {
             return;
         }
 
-        if (retry) {
+        if (retryId) {
             //Don't retry for USERSTATE only on join
             //try a join again so the ROOMSTATE get send
             ChatLive_JoinID[chat_number] = Main_setTimeout(
                 function () {
-                    ChatLive_socket[chat_number].send('JOIN #' + ChatLive_selectedChannel[chat_number]);
+                    var chat_number = ChatLive_Slot(retryId);
+                    if (chat_number > -1) ChatLive_socket[chat_number].send('JOIN #' + ChatLive_selectedChannel[chat_number]);
                 },
                 1000,
                 ChatLive_JoinID[chat_number]
@@ -1868,7 +1995,8 @@ function ChatLive_LineAddCheckDelay(chat_number, messageObj) {
 function ChatLive_LineAddDelay(chat_number, id, messageObj) {
     Main_setTimeout(
         function () {
-            if (id === Chat_Id[chat_number]) ChatLive_LineAdd(messageObj);
+            messageObj.chat_number = ChatLive_Slot(id);
+            if (messageObj.chat_number > -1) ChatLive_LineAdd(messageObj);
         },
         Play_ChatDelayPosition === 1 ? ChatLive_Latency[chat_number] : Play_ChatDelayPosition
     );
@@ -2123,13 +2251,16 @@ function ChatLive_SetLatency(chat_number, latency) {
 
 function ChatLive_ClearIds(chat_number) {
     ChatLive_CheckClear(chat_number);
-    Main_clearTimeout(ChatLive_socketSendCheckID);
     Main_clearTimeout(ChatLive_loadBadgesChannelId);
     Main_clearTimeout(ChatLive_LatencyId[chat_number]);
     Main_clearInterval(ChatLive_loadChattersId[chat_number]);
     Main_clearInterval(ChatLive_StartSharedId[chat_number]);
     Main_clearInterval(ChatLive_PingId[chat_number]);
-    Main_clearInterval(ChatLive_SendPingId);
+
+    if (!chat_number) {
+        Main_clearTimeout(ChatLive_socketSendCheckID);
+        Main_clearInterval(ChatLive_SendPingId);
+    }
 }
 
 function ChatLive_Clear(chat_number) {

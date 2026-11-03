@@ -239,7 +239,8 @@ function Chat_loadBadgesGlobalRequestWithChannel(chat_number, id, channelId) {
 }
 
 function Chat_loadBadgesGlobalSuccess(obj, id, chat_number, channelId) {
-    if (id !== Chat_Id[chat_number]) return;
+    chat_number = ChatLive_Slot(id);
+    if (chat_number < 0) return;
 
     Chat_GlobalBadges = {};
 
@@ -726,7 +727,6 @@ function Chat_Clear() {
     Chat_lastMsgTime = 0;
     Chat_loadingMore = false;
     Main_emptyWithEle(Chat_div[0]);
-    Main_emptyWithEle(Chat_div[1]);
     Chat_cursor = null;
     Chat_Messages = [];
     Chat_MessagesNext = [];
@@ -734,8 +734,12 @@ function Chat_Clear() {
     Chat_comment_ids = {};
     Main_clearTimeout(Chat_loadMoreId);
     ChatLive_ClearIds(0);
-    ChatLive_ClearIds(1);
     ChatLive_resetChatters(0);
+
+    if (!PlayExtra_PicturePicture || PlayExtraVod_InPP) {
+        Main_emptyWithEle(Chat_div[1]);
+        ChatLive_ClearIds(1);
+    }
 }
 
 function Main_Addline(id) {
