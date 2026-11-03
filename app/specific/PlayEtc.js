@@ -2889,14 +2889,12 @@ function Play_MakeControls() {
             Play_isFullScreen = !Play_isFullScreen;
             Play_SetFullScreen(Play_isFullScreen);
 
-            if (PlayExtra_PicturePicture) {
+            if (PlayExtra_PicturePicture && !PlayExtraVod_InPP) {
                 if (!Play_isFullScreen) {
-                    ChatLive_Init(1);
+                    if (!Chat_Id[1]) ChatLive_Init(1);
+                    ChatLive_RemoveAnimation(1);
                     PlayExtra_ShowChat();
-                } else {
-                    ChatLive_Clear(1);
-                    PlayExtra_HideChat();
-                }
+                } else PlayExtra_HideChat();
             }
             Chat_SetHighlights();
             this.setLabel();
@@ -3192,8 +3190,11 @@ function Play_MakeControls() {
 
             if (PlayVodClip === 1) {
                 ChatLive_Init(0);
-                if (PlayExtra_PicturePicture && !Play_isFullScreen && !Play_MultiEnable) ChatLive_Init(1);
-            } else Chat_Init();
+                if (PlayExtra_PicturePicture && !PlayExtraVod_InPP && !Play_MultiEnable) ChatLive_Init(1);
+            } else {
+                Chat_Init();
+                if (PlayVodClip === 2 && PlayExtra_PicturePicture) ChatLive_Init(1);
+            }
 
             this.setLabel();
             Main_SaveValuesWithTimeout();

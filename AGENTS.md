@@ -365,6 +365,28 @@ Consequences worth knowing before changing any of it:
   that drops the VOD state has to run **after** that check, or the small window's VOD reads as a live
   stream of its channel and that channel's own live stream is refused as already playing.
 
+## Chat in picture in picture
+
+Both live chats of a pair run the whole time: chat 0 for the main stream, chat 1 for the small one,
+including while the video is fullscreen and `chat_container1` is hidden. A switch never restarts them.
+`ChatLive_Switch` swaps every per chat array, the lines in `chat_box0`/`chat_box1` and the chatters
+label, so each chat keeps its history and socket and only changes slot. The send socket belongs to
+slot 0 and is restarted by the switch.
+
+Rules that keep this working:
+
+- Anything that runs later (socket handlers, timers, request callbacks, delayed and paused lines)
+  finds its chat with `ChatLive_Slot(id)` and must not trust a `chat_number` it captured, because a
+  switch may have moved the chat. A new per chat array has to be added to the list in
+  `ChatLive_Switch`, or it stays with the window instead of following the stream.
+- `Chat_Id` values must be unique across the two slots, which `ChatLive_SetOptions` guarantees.
+- In a vod and live pair the vod's replay chat owns slot 0 and the live chat keeps slot 1. The vod
+  chat's `Chat_Clear` runs on every start and seek, so it leaves slot 1 alone while
+  `PlayExtra_PicturePicture` is set and `PlayExtraVod_InPP` is false. `PlayExtraVod_SwitchToLiveMain`
+  therefore has to clear the vod chat before it flips `PlayExtraVod_InPP`.
+- A vod in the small window still gets no chat, and multistream is unchanged: it still reinitialises
+  chat 0 when its main stream changes.
+
 ## Presence
 
 `app/specific/Presence.js` makes Twitch credit the account for what the app plays, which it
@@ -429,6 +451,7 @@ feat/pip-vod                    merged, complete — a VOD in the picture in pic
  ├ fix/pip-vod-chat-resume        merged — vod chat restarts after pause and seek when the vod came from the pair
  └ fix/pip-vod-open-live-icon     merged — the vod's open live control stays off the live panel after a swap
 fix/vod-chat-end-of-chat        merged — vod chat retries failed loads and keeps the end-of-chat page
+fix/pip-chat-keep-both          NOT merged yet — both live chats survive a picture in picture switch
 fix/presence-pip-vod            merged — presence in a vod and live pair; replay after feat/presence and feat/pip-vod
 feat/low-latency-core           merged — the controller, the cushion setting, the speed gate
  ├ exp/audio-pitch-follows-speed  NOT merged — evaluated alternative to time stretching, then reverted
