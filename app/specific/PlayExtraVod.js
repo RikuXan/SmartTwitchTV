@@ -477,6 +477,8 @@ function PlayExtraVod_EnterLiveMain() {
     Main_clearInterval(PlayVod_SaveOffsetId);
     Main_clearInterval(PlayVod_RefreshProgressBarrID);
     Main_clearTimeout(PlayVod_WarnEndId);
+    Main_clearTimeout(PlayClip_CheckIsLiveTimeoutId);
+    PlayClip_CheckIsLiveId = 0;
     Main_removeEventListener('keydown', PlayVod_handleKeyDown);
     PlayVod_previews_clear();
     PlayVod_ChaptersArray = [];
@@ -577,6 +579,7 @@ function PlayExtraVod_EnterVodMain() {
 
     Main_PlayVodHandleKeyDown();
     Play_EndSet(2);
+    PlayClip_CheckIsLive(Main_values.Main_selectedChannel_id, true);
     PlayVod_get_vod_info();
     Play_ShowPanelStatus(2);
     Play_getQualities(2, false);
