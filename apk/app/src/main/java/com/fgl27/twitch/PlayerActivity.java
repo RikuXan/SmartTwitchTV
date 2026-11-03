@@ -113,6 +113,8 @@ import net.grandcentrix.tray.AppPreferences;
 public class PlayerActivity extends Activity {
 
     private static final boolean LL_DIAG = true;
+    //Keep short: while the grace runs, video holds its last frame and audio plays on
+    private static final long VIDEO_OUTPUT_GAP_GRACE_MS = 100;
 
     private long BufferJitterEma = -1;
 
@@ -663,6 +665,17 @@ public class PlayerActivity extends Activity {
                 )
                 .build();
 
+            for (int i = 0; i < PlayerObj[PlayerObjPosition].player.getRendererCount(); i++) {
+                androidx.media3.exoplayer.Renderer renderer = PlayerObj[PlayerObjPosition].player.getRenderer(i);
+                if (renderer instanceof androidx.media3.exoplayer.video.MediaCodecVideoRenderer) {
+                    androidx.media3.exoplayer.video.MediaCodecVideoRenderer videoRenderer =
+                        (androidx.media3.exoplayer.video.MediaCodecVideoRenderer) renderer;
+                    PlayerObj[PlayerObjPosition].SpeedControl.setUnreadVideoSource(videoRenderer::getUnreadQueuedDurationUs);
+                    videoRenderer.setOutputGapGraceMs(VIDEO_OUTPUT_GAP_GRACE_MS);
+                    break;
+                }
+            }
+
             if (LL_DIAG) {
                 for (int i = 0; i < PlayerObj[PlayerObjPosition].player.getRendererCount(); i++) {
                     androidx.media3.exoplayer.Renderer renderer = PlayerObj[PlayerObjPosition].player.getRenderer(i);
@@ -688,7 +701,10 @@ public class PlayerActivity extends Activity {
 
         PlayerObj[PlayerObjPosition].player.setPlayWhenReady(true);
         if (PlayerObj[PlayerObjPosition].SpeedControl != null) {
-            PlayerObj[PlayerObjPosition].SpeedControl.useCushion(PlayerObj[PlayerObjPosition].originCushion.adaptiveCushion);
+            PlayerObj[PlayerObjPosition].SpeedControl.useCushion(
+                PlayerObj[PlayerObjPosition].originCushion.adaptiveCushion,
+                PlayerObj[PlayerObjPosition].originCushion.delivery
+            );
         }
         PlayerObj[PlayerObjPosition].player.setMediaSource(PlayerObj[PlayerObjPosition].mediaSources, PlayerObj[PlayerObjPosition].ResumePosition);
 
@@ -1305,12 +1321,11 @@ public class PlayerActivity extends Activity {
                             " pp=" + PlayerObj[0].player.getPlaybackParameters().speed +
                             " pos=" + pos +
                             " ctlMin=" + (PlayerObj[0].SpeedControl != null ? PlayerObj[0].SpeedControl.getWindowedMinMs() : -1) +
+                            " ctlUnreadMin=" + (PlayerObj[0].SpeedControl != null ? PlayerObj[0].SpeedControl.getWindowedUnreadVideoMinMs() : -1) +
+                            " unreadLow=" + (PlayerObj[0].SpeedControl != null ? PlayerObj[0].SpeedControl.takeUnreadVideoLowMs() : -1) +
                             " ctlStallX=" + (PlayerObj[0].SpeedControl != null ? PlayerObj[0].SpeedControl.getStallExtraMs() : -1) +
                             " ctlLearned=" + (PlayerObj[0].SpeedControl != null ? PlayerObj[0].SpeedControl.getLearnedCushionMs() : -1) +
-                            " ctlConfirmed=" + (PlayerObj[0].SpeedControl != null && PlayerObj[0].SpeedControl.isReserveConfirmed()) +
-                            (PlayerObj[0].SpeedControl != null ? PlayerObj[0].SpeedControl.getShadowSnapshot() : "") +
-                            " ctlProbe=" + (PlayerObj[0].SpeedControl != null && PlayerObj[0].SpeedControl.isProbingCushion()) +
-                            " ctlProbeWaitMs=" + (PlayerObj[0].SpeedControl != null ? PlayerObj[0].SpeedControl.getProbeIntervalMs() : -1) +
+                            (PlayerObj[0].SpeedControl != null ? PlayerObj[0].SpeedControl.getSizingSnapshot() : "") +
                             " ctlSpeed=" + (PlayerObj[0].SpeedControl != null ? PlayerObj[0].SpeedControl.getAdjustedSpeed() : -1) +
                             " target=" + target +
                             " lowLat=" + mLowLatency +

@@ -474,10 +474,9 @@ commits as already merged and a later `git merge` silently brings in only the ne
 the revert or rebasing the branch first works, but rebuilding is simpler and leaves no trap.
 
 `feat/ltb-measurement` landed the measuring half of adaptive buffer sizing and none of the control
-half: `TwitchBufferShadow` computes a recommendation that nothing reads, and the conservative-start
-controller does not exist. See "Remaining limits of cushion adaptation" and "September 19
-measurement and recovery state" below for exactly what is and is not established. That work
-continues on `feat/adaptive-buffer-sizing`, branched from `main` rather than from
+half. `feat/adaptive-buffer-sizing` adds the control half: `TwitchBufferLows` replaces
+`TwitchBufferShadow`, and measured trims replace the step-down probes (see "How the controller
+works"). It is branched from `main` rather than from
 `feat/ltb-measurement` because `main` already contains all of it.
 
 Media3 fork. `release` mirrors upstream and never moves; `main` is the default branch and has every
@@ -490,7 +489,15 @@ feat/twitch-prefetch            merged — EXT-X-TWITCH-PREFETCH parsing
  └ feat/hls-low-latency-target  merged — server clock live offset, target tuning
     └ feat/hls-origin-cushion   merged — cushion from the multivariant playlist
 exp/audio-pitch-follows-speed   NOT merged — the app side reverted it, mainline would carry dead code
+feat/renderer-unread-duration   NOT merged yet — prerequisite of feat/adaptive-buffer-sizing
+ └ feat/video-output-gap-grace  NOT merged yet — prerequisite of feat/adaptive-buffer-sizing
 ```
+
+`feat/renderer-unread-duration` branches from `main` and adds
+`MediaCodecRenderer.getUnreadQueuedDurationUs()`. `feat/video-output-gap-grace` stacks on it and
+adds `MediaCodecVideoRenderer.setOutputGapGraceMs(long)`. `feat/adaptive-buffer-sizing` calls both,
+so the app branch only builds against a media checkout that contains the grace branch. Merge both
+into media `main` together with the app branch.
 
 Every merge into `main` is a `--no-ff` merge commit, so any single feature can be reverted on its
 own. The feature branches are kept after merging; delete one only once its work is certainly not
@@ -513,7 +520,9 @@ no way to push JS to the device without rebuilding and reinstalling.
 # The low-latency feature
 
 This fork's main purpose. Goal: sit as close to the live edge as the stream's delivery allows,
-without buffer-underrun stutters. Latency currently runs ~1.3–1.6 s live-to-broadcast on an EU
+without buffer-underrun stutters during normal segment delivery. Stalls caused by abnormal delivery,
+such as hard server errors or a pause inside a segment's byte stream, are acceptable. Buffer
+sizing must ignore them rather than grow the cushion for them. Latency currently runs ~1.3–1.6 s live-to-broadcast on an EU
 stream with a 0.25–0.5 s cushion, which is ahead of the browser on the same stream.
 
 ## Why the control target is the buffer, not the live offset
@@ -558,25 +567,42 @@ current slot after preview promotion; older traces retain creation-slot labels.
   is within 200 ms of its peak, or a 10 s deadline expires.
 - **Warmup asymmetry**: until one full window of real data exists, slowing below 1.0× is forbidden
   (`minSpeed = 1f`) while shaving above it is allowed — the window's early lows are fill artifacts.
-- **Stall response**: `TwitchBufferCushion` provisionally adds 250 ms (cap 1500 ms) and
-  re-arms the window. One ordinary stall gets temporary recovery allowance: held for 120 s,
-  then decayed at 25 ms/s. Another ordinary stall within 30 minutes promotes the raised allowance
-  to a learned extra; subsequent failures raise it. `ctlConfirmed` tracks this evidence separately
-  from the numeric reserve: an origin seed alone does not qualify, so its first ordinary failure
-  receives only temporary recovery allowance. Failed probes restore the previous reserve and
-  confirmation state. The effective extra is the maximum of learned
-  and temporary recovery allowance. Source reset clears both.
-- **Downward probes**: after five minutes of eligible settled playback, reduce learned extra by
-  50 ms. A failure during a probe restores the previous learned level and doubles the wait,
-  up to 30 minutes. Eligible playback needs a warm window, speed within 0.005 of 1x, and a window
-  minimum within 50 ms of the effective target. Pauses do not count. Probes stop at zero extra,
-  preserving the configured user floor. The origin estimate seeds this same adaptive reserve once
-  per source; successful probes can remove it entirely.
-- **Excluded failures**: confirmed timeout, DNS, connection/no-route errors and HTTP 401/403/429/5xx
-  media or manifest failures during the stall or within five seconds before it exclude that stall
-  from learning and roll back its provisional allowance on recovery. Request age alone, generic
-  EOF and prefetch 404 are not proof of an unusual failure. Audio-only underruns do not notify
-  the cushion policy. Recovery/error callbacks work independently of diagnostic logging.
+- **Start**: each source starts with a 200 ms adaptive reserve above the user floor
+  (`TwitchBufferCushion.START_RESERVE_US`). The origin estimate can only raise it, once per source.
+- **Measured sizing**: `TwitchBufferLows` takes the speed-corrected minimum of the aggregate
+  buffer for each 10 s bucket. A bucket counts as covered after 5 s of samples. The level is the
+  median low of the last 6 covered buckets, with at least 3 required. Each bucket's depth is that
+  level minus its own low, and the depths are kept for 20 minutes. The recommended cushion is
+  `150 ms + deepest depth`, the target that would have kept the worst normal-delivery dip at the
+  150 ms margin while the controller holds the typical 10 s low at the target. Measuring against
+  the level just before a dip keeps a slow drift of the buffer from deepening old dips. Raises
+  apply as soon as one depth is known, including the bucket in progress. A trim needs 18 covered
+  depths (3 minutes), 3 minutes since the last change and a 25 ms difference, and it goes
+  straight to the recommendation. The user floor is never undercut.
+- **Stall response**: a stall provisionally adds 250 ms (cap 1500 ms) and re-arms the window.
+  The measured depths survive it; only the level restarts, and a new source clears everything.
+  After a normal-delivery stall the raised reserve is kept, and trims are held for 20 minutes.
+- **Abnormal delivery**: `TwitchDeliveryProgress` learns each stream's normal delivery from its
+  last 20 completed media requests that lasted at least 1 s. The pause limit is
+  `max(250 ms, 3.5 × median of those requests' longest pause)`, and 250 ms until 5 requests have
+  completed. With fewer, one slow startup request put a US stream's limit at 1491 ms. That is about 560 ms on US origins, whose requests normally pause for about
+  280 or 420 ms, and 250 ms on EU origins. A media request that goes longer than the pause limit
+  without bytes, including the first-byte wait, is abnormal. So is a confirmed trickle.
+  - **Flagging a trickle**: while it is the only media request in flight, the request delivers
+    less than 30% of the stream's usual byte rate over a short window, or less than 50% over a long
+    one. The usual rate is the median of the last 5 requests. The windows are 500 ms and 1 s
+    scaled by pause limit / 250 ms (at most 3×) and checked in 50 ms slots.
+  - **Confirming it**: a low-rate window counts only once the request catches up to 90% of the
+    usual rate since the window started, or finishes later than the stream's median request
+    duration plus the pause limit. A quiet, low-bitrate scene does neither.
+  - **Consequences**: confirmed timeout, DNS, connection/no-route errors and HTTP
+    401/403/429/5xx failures count as well. A stall during an abnormal delivery or within 15 s
+    after one keeps no bump. Buffer lows from the abnormal delivery's start until 15 s after its
+    end are not measured. Samples are committed two long windows plus 150 ms late
+    (`detectionDelayMs()` + 100 ms, 2150 ms at the base scale) so that the undetected onset and
+    the confirmation delay are covered.
+  - **Not abnormal**: request age alone, generic EOF and prefetch 404. Delayed playlist responses
+    with no media request in flight are not detected yet.
 - **Speed output**: retains the existing 1500 ms cadence, up-to-0.01 glide, and 0.005 snap threshold;
   intermediate fractional speeds remain available. Catch-up stops immediately if instantaneous
   buffer reaches the effective cushion. The audio processor remains active at 1× to preserve continuity.
@@ -679,12 +705,19 @@ The runtime capture is `.tmp/ltb-browser/network-clock-runtime.log`.
 too**, deliberately. The per-tick heartbeat is the main data source:
 
 ```
-raw= shown= edgeDist= buf= pp= pos= ctlMin= ctlStallX= ctlLearned= ctlConfirmed= ctlProbe= ctlProbeWaitMs= ctlSpeed= target= lowLat= targetMs= origin= extraMs= speedAdj=
+raw= shown= edgeDist= buf= pp= pos= ctlMin= ctlUnreadMin= unreadLow= ctlStallX= ctlLearned= lowsBuckets= lowsLevelMs= lowsDepthMs= lowsTargetMs= ctlTrimHoldMs= abnormalAgoMs= ctlSpeed= target= lowLat= targetMs= origin= extraMs= speedAdj=
 ```
 
-`ctlMin` is the windowed minimum, `ctlStallX` the current stall extra, `ctlSpeed` the controller's
-output, `ctlLearned` the adaptive reserve in ms (initially the origin seed, subsequently learned/probed), `ctlProbe` the active probe state, and
-`ctlProbeWaitMs` the required eligible time between probes. `target` is the Media3 base target
+`ctlMin` is the windowed minimum, `ctlUnreadMin` the same speed-corrected 10 s minimum of the
+unread video (see "September 24 stall point" below), `unreadLow` the raw unread-video minimum
+since the previous heartbeat, `ctlStallX` the current stall extra, `ctlSpeed` the controller's
+output, and `ctlLearned` the adaptive reserve in ms. `lowsBuckets` counts the covered 10 s
+buckets with a measured depth. `lowsLevelMs` is the current level at the current speed trajectory,
+-1 while fewer than 3 buckets back it. `lowsDepthMs` is the deepest depth in the last 20 minutes
+and `lowsTargetMs` the recommended cushion, both -1 until a depth is known.
+`ctlTrimHoldMs` is the time left before trims resume after a normal-delivery stall.
+`abnormalAgoMs` is the age of the latest abnormal delivery, byte gap or trickle, 0 while one is
+ongoing and -1 if none has happened. `target` is the Media3 base target
 (user floor in this mode), `targetMs` the user setting, and `target + ctlStallX` the effective
 cushion. `extraMs` records the initial origin estimate and must not be added again. Event lines carry a `p<slot>`
 prefix:
@@ -693,18 +726,24 @@ prefix:
   correlate a stall with media request progress and playlist completion. No media request in flight
   can also mean delayed playlist discovery; it does not establish a local renderer fault.
 - `STALL-RECOVERED durMs= ignoredForLearning= learnedMs=`
-- `DELIVERY-END deliveryId= request= media= outcome= durationMs= openMs= firstByteMs= bytes= maxByteGapMs= maxReadWaitMs=`
+- `DELIVERY-END deliveryId= request= media= outcome= durationMs= openMs= firstByteMs= bytes= maxByteGapMs= maxReadWaitMs= lowRateMs= slowMs=`
+  — `lowRateMs` is how long the request ran below the trickle thresholds, `slowMs` how much of
+  that was confirmed as a trickle.
 - `LOAD-RETRY`, `LOAD-COMPLETED (SLOW-LOAD >4s)`, `LOAD-CANCELED`, `LOAD-ERROR`
 - `AUDIO-UNDERRUN bufMs= sinceFeedMs=` — the audio path starving, which is *not* a buffer
   underrun and has a different cause.
 - `DROPPED-FRAMES count= elapsedMs=`
+- `VIDEO-OUTPUT-GRACE rendererId= durationMs= outcome=resumed|expired sourceReady= outputAvailable= buffersInCodec=`
+  — one record per gap the video readiness grace covered. `expired` means it did not bridge the
+  gap and a stall followed.
 
 ### Delivery progress diagnostics
 
 `TwitchProgressDataSource` wraps live HLS reads and feeds a per-source `TwitchDeliveryProgress`.
 Heartbeat and stall snapshots include `deliveryId`, `mediaRequests`, `mediaBytes` (sum on active
-requests), `mediaNoByteMs`, `mediaReadWaitMs` and `mediaOpenWaitMs` (maxima across active media
-requests; -1 means unavailable). `.ts`, `.m4s` and `.mp4` paths count as media; other paths still
+requests), `mediaNoByteMs`, `mediaReadWaitMs`, `mediaOpenWaitMs` and `mediaLowRateMs` (maxima
+across active media requests; -1 means unavailable; `mediaLowRateMs` is the age of an ongoing,
+not yet confirmed low-rate stretch), and `pauseLimitMs`, the stream's current pause limit. `.ts`, `.m4s` and `.mp4` paths count as media; other paths still
 emit completion records. No URL/token is included in the added completion record.
 
 `DELIVERY-END` records first-byte/open delay and maximum blocked-read duration, plus gaps between
@@ -728,13 +767,107 @@ The implementation/test/deployment notes are `.tmp/tentative-reserve/report.md`.
 - **PiP/multi**: each player slot runs its own controller; two 1080p streams on this device can
   starve each other.
 
+## Measured sizing results
+
+The step 2 build ran on September 26 with the video output-gap grace. It covered 6.1 h of live
+`eun11` playback: 15:45–18:31, 18:32–18:57 and 20:27–23:55, because the Mac capture missed
+18:57–20:27. The effective cushion had a median of 273 ms, the buffer 387 ms, and the hourly
+median LTB was 440–505 ms. `lowsTargetMs` had a median of 270 ms (p10 199, p90 330), so the
+250 ms `ll_target` floor capped the cushion about a quarter of the time. Rare deep dips raised
+it by 25–100 ms, and about 20 minutes later, once the dip left the window, it trimmed back.
+All nine stalls with byte gaps of 338–531 ms were ignored for sizing. Two stalls had normal
+delivery. At 21:33 the cushion was 283 ms, two minutes after an abnormal stall had reset the
+lows. At 23:54 3.4 s were still buffered right before a channel switch, so it was not a
+delivery stall. For comparison, the grace build with probes (September 24 evening) had a
+median cushion of 350 ms, a buffer of 465 ms, an LTB of 534 ms and 0.2 normal-delivery stalls
+per hour. The build without the grace had 473 ms, 583 ms, 656 ms and 1.3 per hour.
+
+From 15:45 to 18:23 the LTB read about 2.3 s while the buffer (about 390 ms), `raw` (about
+1.17 s) and `edgeDist` (about 3.1 s) matched later sessions of the same channel. The extra
+latency came from outside the player; reloading the stream brought LTB back to about 0.5 s.
+
+### With `ll_target` at 0
+
+`ll_target` was set to 0 s on September 27 at 00:22 (same build, PID 8381). The evaluation uses
+the single-stream `eun12` evening, 15:45–22:32 without the 16:37–17:06 picture in picture
+session: 6.3 h. The median effective cushion was 390 ms, the buffer 526 ms and the LTB 616 ms.
+`lowsTargetMs` had a median of 364 ms (p10 267, p90 456) and was below 250 ms only 7.7% of the
+time, so dropping the floor changed little. The day's delivery made the difference.
+
+Five stalls had byte gaps and were ignored. Six passed as normal delivery, about one per hour:
+
+- 16:03, 17:14, 17:44 and 19:20 were trickles. The media request's bytes fell to 118–257 KB per
+  500 ms heartbeat, against a median of about 510 KB and a 1st percentile of 273 KB. Media stopped
+  arriving and the buffer fell 350–470 ms within about a second. No single pause exceeded
+  250 ms, so `ABNORMAL_BYTE_GAP_MS` did not flag them.
+- 18:48 and 20:44 happened at a segment boundary. The next segment's first frames arrived
+  350–450 ms after the previous segment completed; at 18:48 the first byte took 127 ms (normally
+  30–55). The 20:44 stall came two minutes after a trim to 214 ms. That trim followed the
+  abnormal stall at 20:39, which had cleared the lows while they recommended 407 ms.
+
+Buffer drops of at least 200 ms within one second during trickling bytes happened 3.5 times per
+hour on this evening, and 0.3–1.3 times per hour on September 26's `eun11`.
+
+The recommendation also creeps upward without new dips. At 1.0× the buffer drifts upward inside
+the controller's ±50 ms deadband. The window's median follows the drift, but the worst low keeps
+the level it had when it happened, so median − worst grows. From 21:36 to 22:04 the cushion rose
+from 425 to 501 ms in 25 ms steps with no deeper dip. At 22:05 the 21:35 dip left the window and the
+cushion trimmed to 337 ms. Of the day's 1333 ms of raises, 413 ms came from this creep.
+
+### Local depths and trickle detection
+
+Installed September 27 at 23:05 (PID 12031); four app runs through September 28 gave 2.2 h of
+live playback. On `eun12` (1.2 h) the median LTB was 458 ms, the buffer 416 ms and the cushion
+295 ms, with no normal-delivery stall. All three stalls there were ignored correctly: two came
+during flagged trickles, and one was a 3.7 s stall behind a playlist request that hung for 6 s
+before failing with an HTTP error. The cushion no longer crept. It held 393 ms for 20 minutes
+after a 243 ms dip, then trimmed to 295 ms, and the ignored stalls did not reset it. Of five
+trickle flags, three matched real buffer drops of 530–640 ms.
+
+The fixed thresholds do not fit other origins. On US origins (`usw22`, `usw24`, `use23`), a
+media request normally pauses for about 280 or 420 ms, two or three round trips of about 140 ms,
+and never longer than 447 ms in about 1550 requests. 8–9% of their requests exceed the 250 ms
+byte gap, which predates this build, and the trickle rule flags another 4–6%. On `euc11`, which has 4 s segments,
+the trickle rule flagged 6% of requests with little buffer movement. On those streams an
+abnormal flag arrives every 20–30 s. Together with the 15 s exclusion, it keeps the measurement
+off most of the time and ignores every stall, so the cushion stays at the origin estimate. A
+relative limit of 1.5 × the 95th percentile of the last 50 requests only halves the US flags,
+because the 420 ms pauses make up about 4% of requests.
+
+### Pauses come from upstream, and their rate varies by day
+
+A September 29 experiment (`exp/shadow-segment-download`, abandoned) downloaded every segment a
+second time on its own connection. Of 33 player pauses over 290 ms, the second connection paused at the same time and for
+the same length in 32, on all four addresses of each of two CloudFront sites. The pauses start
+upstream of the CDN, so a second connection or another edge cannot avoid them.
+
+Comparing days by media requests with a pause over 290 ms:
+
+| | long pauses | stalls | stalled, by load-start buffer minus pause: <0 / 0–100 / 100–200 / ≥200 ms |
+| --- | --- | --- | --- |
+| Sep 26 `eun11`, old sizing (5.9 h, buffer 387 ms) | 2.2/h | 1.9/h | 5/5, 4/7, 0/1, 0/0 |
+| Sep 27 `eun12`, old sizing (7.1 h, 533 ms) | 2.1/h | 1.8/h | 2/2, 4/7, 0/3, 0/3 |
+| Sep 29 `eun11`, per-stream limits (4.0 h, 419 ms) | 6.0/h | 2.8/h | 4/4, 4/10, 0/9, 0/1 |
+| Sep 29 `eun11`, with shadow (3.8 h, 449 ms) | 8.8/h | 4.7/h | 10/10, 5/13, 0/5, 0/6 |
+
+A pause stalls when it is longer than the buffer, about half the time when it is shorter by less
+than 100 ms, and never with more room, in every build. The September 29 stall rate follows three
+to four times as many long pauses, not a change in how they turn into stalls.
+
 ## Remaining limits of cushion adaptation
 
-The adaptive policy searches the whole reserve, including its initial origin estimate, above the
-configured user floor. It does not probe below the user setting. Its five-minute initial probe interval,
-50 ms step, and 30-minute failure memory are initial experimental choices. Unit tests and synthetic
-closed-loop simulations cover learning, exclusion, rollback and eventual reduction after delivery
-improves; these do not establish real-device stutter-free operation or an optimal latency.
+The 150 ms margin, the 20-minute memory, the 3-minute trim spacing, the 20-minute hold after a
+normal-delivery stall and the 250 ms byte-gap cut-off are first choices. They are calibrated
+against one evening of `eun12` playback with the video output-gap grace active. The trickle
+thresholds come from the September 26–27 heartbeats. The 3.5× pause factor comes from about
+45 minutes of US-origin and 20 minutes of `euc11` playback on September 28. Replayed on
+those requests, it flagged 0% of US requests (instead of 8.4%), 1.8% of `euc11` requests
+(instead of 6.7%) and kept both September 27 `eun12` stalls with 502 and 602 ms pauses abnormal.
+A factor of 4 would have put `eun11`'s limit at about 330 ms, just under the shortest abnormal
+pause seen there (338 ms). The trickle confirmation is not replayed; heartbeats only sample the
+byte count every 500 ms. After a stall the level needs 3 covered buckets again,
+so no new depths are measured for about 30 s. The sizing never goes below the user setting
+(`ll_target`), so a floor above the recommendation decides the cushion by itself.
 
 
 ## September 19 measurement and recovery state
@@ -750,11 +883,9 @@ A second stall within 30 seconds or an explicit unusual delivery error restores 
 threshold for 60 seconds. Source reset clears this fallback. Startup and other modes retain their
 existing behavior. `RECOVERY-FILL` records the selected threshold and current buffer.
 
-`TwitchBufferShadow` only observes: a roughly two-minute speed-corrected buffer history, a
-one-minute minimum observation period, and an experimental 150 ms margin. It does not control
-playback. `shadowReady` must be checked before interpreting its recommendation. Aggregate HLS
-buffer duration can exceed the available runway of one track, so the shadow recommendations are
-not yet validated as safe reductions. The proposed conservative-start controller is not implemented.
+At that time `TwitchBufferShadow` only observed: a roughly two-minute speed-corrected buffer
+history, a one-minute minimum observation period and a 150 ms margin. `TwitchBufferLows` on
+`feat/adaptive-buffer-sizing` replaced it.
 
 `RENDERER-READY` identifies audio/video readiness transitions. `VIDEO-READINESS` adds source/output
 readiness and codec buffer counts. Opt-in `TRACK-TIMING` diagnostics report each HLS track's queued
@@ -771,3 +902,106 @@ Local evidence is in `.tmp/track-timing/report.md` and `.tmp/adaptive-recovery/`
 Next work is validating these track-level signals against actual stalls before using them for
 conservative-start sizing and staged reductions. Do not substitute raw sample endpoints for
 proven uninterrupted playback duration.
+
+## September 24 stall point
+
+The first analysis of `TRACK-TIMING` against real stalls used the September 19–20 capture: about
+23 hours of the `fgl27` clone's `twitchll-live.log`, starting at its September 19 01:32 records.
+About 23 of 31 ordinary main-player stalls had the same shape. The video sample queue had drained
+into the decoder (`queuedAheadUs − inputAheadUs` at 0–67 ms, median 16), but aggregate `buf` still
+read 220–320 ms. That remainder sat inside the Shield's video decoder, which held 10–14 buffers
+(an `inputAheadUs` of about 230–290 ms). Audio was not the track that ran out; roughly 300 ms of
+decoded audio sat downstream of its decoder. Just before several of these stalls the shadow
+reported 119–224 ms of headroom, so a trim based on the aggregate minimum would have trimmed into
+stalls.
+
+The decoder does not refuse to drain; the September 24 data below corrects that reading.
+`MediaCodecRenderer.isReady()` needs an unread sample, a dequeued output frame, or the codec
+hotswap grace. With nothing unread, the renderer is ready only while the decoder has the next
+frame out on time. A 10–20 ms output gap with a full decoder then drops the player into
+buffering, and the recovery threshold turns it into a 250–450 ms stall.
+
+About 7 other stalls had a shallow decoder input lead (about 50 ms). In those, `buf` fell from
+300–580 ms to about 80–100 ms in under a second with no media request in flight. They look like
+codec reset or discontinuity events, not delivery shortfalls, and are not yet classified.
+
+`MediaCodecRenderer.getUnreadQueuedDurationUs()` (Media3 branch `feat/renderer-unread-duration`)
+returns the largest queued sample timestamp of the renderer's track minus the renderer's reading
+position. That is the queued media the renderer has not yet read into the decoder. It is
+`TIME_UNSET` without a stream, without queue data, or after the stream was read to its end. Each
+player binds its video renderer to its `TwitchLivePlaybackSpeedControl` at build time.
+`getAdjustedPlaybackSpeed` samples the value on the playback thread on every call, which happens
+on every `doSomeWork` iteration while playing. The controller keeps it in a second
+speed-corrected 10 s window next to the aggregate one and in an unread-video low for the
+heartbeat. Neither affects speed, cushion or recovery yet. Only the main slot's heartbeat takes the
+low, so the first `unreadLow` after a picture-in-picture swap also covers the time the player
+spent in the small window.
+
+This quantity, not aggregate `buf`, is the intended input for trimming the target from observed
+minima.
+
+This build was installed September 24 at about 15:46 Berlin time (PID 20196). All 75 app tests and
+the 15 `MediaCodecRendererTest`/`CodecTimingHistoryTest` cases passed. In the first minute of
+settled playback, `unreadLow` sat at 83–166 ms against a `buf` of about 430 ms. That is never
+above the 500 ms-sampled `TRACK-TIMING` `queuedAheadUs − inputAheadUs` (150–183 ms), and the
+video decoder input lead was about 240–280 ms.
+
+The first 91 minutes of that process (15:48–17:19, one `eun12` source, no sequence gaps) had four
+main-player stalls, and each began with unread video at 0. They came in two shapes:
+
+- 16:04 and 16:41: delivery was normal (`loadAgeMs` 371 and 492). The decoder still held 13–14
+  frames when video readiness dropped, and readiness returned 8–21 ms later. The stalls still lasted
+  423 and 313 ms.
+- 15:59 and 17:08: slow segments (`loadAgeMs` 1440 and 920) held unread at 0 for about 200 ms.
+  The decoder then drained to 1–4 frames with `buf` at 77 and 131 ms, and the stalls lasted
+  266–298 ms.
+
+Unread reaching 0 is necessary but not sufficient. 66 heartbeats more than 10 s from any stall
+also had `unreadLow=0`, and it is censored at 0, so it cannot say how deep a shortfall went. At an
+effective cushion of 473 ms, `unreadLow` reached 0 in most 5-minute blocks. At 523–573 ms
+(16:08–16:28) its block minimum stayed at 150–183 ms. Three of the four stalls happened during a
+50 ms step-down probe, from a level where unread had already been reaching 0.
+
+## Video output-gap grace
+
+`MediaCodecVideoRenderer.setOutputGapGraceMs(long)` (Media3 `feat/video-output-gap-grace`) keeps
+the video renderer ready for up to that long after its last processed output buffer, while the
+decoder still holds frames and nothing is unread. `PlayerActivity` sets 100 ms
+(`VIDEO_OUTPUT_GAP_GRACE_MS`) on every player's video renderer. It targets the full-decoder stalls
+from "September 24 stall point": the 10–20 ms wait for the decoder's next frame no longer counts
+as a rebuffer. A drained decoder, a codec flush or a longer gap still reports not ready. During a
+covered gap the playback clock and audio continue and the video frame is late or dropped.
+Playback position is never held back, so this adds no latency. A long grace would hide real video
+freezes behind continuing audio. The unit tests cover the covered gap, its expiry and the
+drained-decoder case.
+
+Installed September 24 at about 18:12 Berlin time (PID 28159). The Mac capture lost most of
+18:17–20:08, so the evaluation uses the device files, which are complete. Compared over the same
+`eun12` channel:
+
+| | before (PID 20196) | with grace (PID 28159) |
+| --- | --- | --- |
+| playing time | 2.4 h (15:48–18:12) | 4.9 h (18:12–23:08) |
+| main-player stalls | 5 (2.1/h) | 7 (1.4/h) |
+| full-decoder stalls | 2 (13–14 frames in codec) | 0 |
+| drained-decoder stalls | 3 | 7, all with `buf` 39–93 ms |
+| median LTB | 656 ms | 534 ms |
+| dropped frames | 0 | 5, in 2 events |
+
+The main player logged 107 `resumed` grace episodes: median 10 ms, 90th percentile 32 ms,
+maximum 102 ms. 108 ended because new media arrived and 62 because the decoder produced a frame,
+counting the small-window player's episodes too. Every `expired` episode had 1–2 frames left in
+the decoder and was followed by a stall, so drains are still reported. Because stalls stopped,
+the step-down probes walked the effective cushion from 473 ms down to the 250 ms user floor.
+From 22:42 it ran there with a median LTB of 404 ms, 39 bridged gaps and no stall. With the grace,
+the stall point in aggregate terms is 40–90 ms, not about 250 ms. The evening and afternoon
+deliveries are not a controlled comparison.
+
+A `loadAgeMs` of about 2 s is normal and does not mark a slow load. Twitch streams each 2 s
+prefetch segment while it is produced, so every media request lasts about 2000 ms (p99 2025 ms).
+Within a request, bytes normally arrive with gaps of about 83 ms: `maxByteGapMs` has a median of
+83 ms and a p99 of 105–165 ms. Eight of the twelve stalls across both builds had a byte gap of
+357–501 ms in the request in flight, which is abnormal delivery. The other four had 66–100 ms:
+16:04 and 16:41 (full decoder, now bridged by the grace), 18:10 and 21:04 (drained). At a
+250 ms cut-off, 0.46% of media requests count as abnormal. The active request's time without bytes
+is live in `TwitchDeliveryProgress` (`mediaNoByteMs`).
