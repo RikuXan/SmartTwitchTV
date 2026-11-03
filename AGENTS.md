@@ -426,7 +426,8 @@ docs/agents-notes               merged — this file
 feat/settings-block-160p        merged — unrelated to low latency, rode along by accident
 feat/presence                   merged — channel points, drops, watch streaks, minute watched
 feat/pip-vod                    merged, complete — a VOD in the picture in picture player
- └ fix/pip-vod-chat-resume        merged — vod chat restarts after pause and seek when the vod came from the pair
+ ├ fix/pip-vod-chat-resume        merged — vod chat restarts after pause and seek when the vod came from the pair
+ └ fix/pip-vod-open-live-icon     merged — the vod's open live control stays off the live panel after a swap
 fix/vod-chat-end-of-chat        merged — vod chat retries failed loads and keeps the end-of-chat page
 fix/presence-pip-vod            merged — presence in a vod and live pair; replay after feat/presence and feat/pip-vod
 feat/low-latency-core           merged — the controller, the cushion setting, the speed gate
@@ -438,36 +439,32 @@ feat/low-latency-core           merged — the controller, the cushion setting, 
           └ feat/ll-speed-glide   merged — slew speed changes so the stretcher stays quiet
              └ feat/ll-diagnostics   merged — merges feat/audio-signalsmith, persisted logs
                 └ feat/ltb-measurement  merged — broadcast delay from timed metadata, adaptive recovery
+feat/adaptive-buffer-sizing     merged — measured cushion sizing and the video output-gap grace; needs the media merges below
 ```
 
 `feat/presence` gates `PresenceLog` on `BuildConfig.DEBUG` because it branches from `master`, where
 the low latency diagnostics do not exist. `main` carries a follow-up commit routing it through
 `TwitchDiagnosticLog` instead — redo that whenever presence is merged forward again.
 
-One branch is still live, so `main` carries work in progress:
-
-```
-feat/adaptive-buffer-sizing     live — the unbuilt control half of feat/ltb-measurement
-```
+No branch is live: `main` carries no work in progress.
 
 `feat/pip-vod` was finished and `main` was rebuilt on 2026-09-19 so the whole feature arrives in a
 single merge; `git revert -m 1` on that merge backs out all of picture in picture. The pre-rebuild
-tip is `archive/main-before-pip-rebuild-2026-09-19`. `fix/pip-vod-chat-resume` came later and is
-stacked on it in its own merge, so revert that merge first.
+tip is `archive/main-before-pip-rebuild-2026-09-19`. `fix/pip-vod-chat-resume` and
+`fix/pip-vod-open-live-icon` came later and are stacked on it in their own merges, so revert those
+merges first.
 
-### Landing a live branch as one merge
+### Landing a branch as one merge
 
 `main` is a mechanical replay: `master` plus one `--no-ff` merge per branch, in dependency order,
 plus the presence fixup and the docs. Nothing on it is hand-written except those two, so it can be
 rebuilt from the feature branches at any time and the result compared tree-for-tree against the old
 tip.
 
-So when `feat/pip-vod` and `feat/adaptive-buffer-sizing` are finished, do not merge the remainder on
-top. Rebuild `main` from `master` with the finished branches in place and force push it. Each
-feature then enters `main` through exactly one merge commit and `git revert -m 1 <merge>` backs the
-whole thing out.
-
-Rebuild once, after both are done, not once per feature.
+A branch that never reached `main` lands as one `--no-ff` merge on top. A branch that was merged
+while unfinished must not get its remainder merged on top: rebuild `main` from `master` with the
+finished branch in place and force push it, so the feature still enters `main` through exactly one
+merge commit and `git revert -m 1 <merge>` backs the whole thing out.
 
 Do **not** instead revert the partial merge and re-merge the same branch later: git treats those
 commits as already merged and a later `git merge` silently brings in only the new ones. Reverting
@@ -476,8 +473,8 @@ the revert or rebasing the branch first works, but rebuilding is simpler and lea
 `feat/ltb-measurement` landed the measuring half of adaptive buffer sizing and none of the control
 half. `feat/adaptive-buffer-sizing` adds the control half: `TwitchBufferLows` replaces
 `TwitchBufferShadow`, and measured trims replace the step-down probes (see "How the controller
-works"). It is branched from `main` rather than from
-`feat/ltb-measurement` because `main` already contains all of it.
+works"). It never reached `main` before it was finished, so it was rebased onto `main` and landed
+as one merge on 2026-11-03.
 
 Media3 fork. `release` mirrors upstream and never moves; `main` is the default branch and has every
 branch below merged into it except the experiment:
@@ -489,15 +486,14 @@ feat/twitch-prefetch            merged — EXT-X-TWITCH-PREFETCH parsing
  └ feat/hls-low-latency-target  merged — server clock live offset, target tuning
     └ feat/hls-origin-cushion   merged — cushion from the multivariant playlist
 exp/audio-pitch-follows-speed   NOT merged — the app side reverted it, mainline would carry dead code
-feat/renderer-unread-duration   NOT merged yet — prerequisite of feat/adaptive-buffer-sizing
- └ feat/video-output-gap-grace  NOT merged yet — prerequisite of feat/adaptive-buffer-sizing
+feat/renderer-unread-duration   merged — prerequisite of feat/adaptive-buffer-sizing
+ └ feat/video-output-gap-grace  merged — prerequisite of feat/adaptive-buffer-sizing
 ```
 
-`feat/renderer-unread-duration` branches from `main` and adds
-`MediaCodecRenderer.getUnreadQueuedDurationUs()`. `feat/video-output-gap-grace` stacks on it and
-adds `MediaCodecVideoRenderer.setOutputGapGraceMs(long)`. `feat/adaptive-buffer-sizing` calls both,
-so the app branch only builds against a media checkout that contains the grace branch. Merge both
-into media `main` together with the app branch.
+`feat/renderer-unread-duration` adds `MediaCodecRenderer.getUnreadQueuedDurationUs()`.
+`feat/video-output-gap-grace` stacks on it and adds
+`MediaCodecVideoRenderer.setOutputGapGraceMs(long)`. The app calls both, so app `main` only builds
+against a media checkout that contains both merges.
 
 Every merge into `main` is a `--no-ff` merge commit, so any single feature can be reverted on its
 own. The feature branches are kept after merging; delete one only once its work is certainly not
