@@ -453,6 +453,7 @@ feat/pip-vod                    merged, complete — a VOD in the picture in pic
 fix/vod-chat-end-of-chat        merged — vod chat retries failed loads and keeps the end-of-chat page
 fix/pip-chat-keep-both          merged — both live chats survive a picture in picture switch
 fix/chat-recent-messages-bare-tags  merged — live chat backfill from recent-messages.robotty.de renders again
+fix/ltb-stale-network-clock     merged — LTB no longer counts clock drift from an idle pause as latency
 fix/presence-pip-vod            merged — presence in a vod and live pair; replay after feat/presence and feat/pip-vod
 feat/low-latency-core           merged — the controller, the cushion setting, the speed gate
  ├ exp/audio-pitch-follows-speed  NOT merged — evaluated alternative to time stretching, then reverted
