@@ -1300,7 +1300,7 @@ public class PlayerActivity extends Activity {
                     PlayerCurrentPosition = PlayerObj[0].player != null ? PlayerObj[0].player.getCurrentPosition() : 0L;
                     PPPlayerCurrentPosition = PlayerObj[1].player != null ? PlayerObj[1].player.getCurrentPosition() : 0L;
 
-                    if (PlayerObj[0].player != null && PlayerObj[0].Type == 1) TwitchNetworkClock.refreshIfDue();
+                    if (anyLivePlayer()) TwitchNetworkClock.refreshIfDue();
 
                     if (LL_DIAG && PlayerObj[0].player != null && PlayerObj[0].Type == 1) {
                         long dur = PlayerObj[0].player.getDuration();
@@ -1341,6 +1341,13 @@ public class PlayerActivity extends Activity {
                 },
                 CurrentPositionTimeout
             );
+    }
+
+    private boolean anyLivePlayer() {
+        for (PlayerObj obj : PlayerObj) {
+            if (obj != null && obj.player != null && obj.Type == 1) return true;
+        }
+        return false;
     }
 
     //The media clock can echo the adjusted speed back into the user playback parameters, which

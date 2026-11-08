@@ -694,9 +694,11 @@ LTB comes from playback-timed Twitch ID3 `segmentmetadata` (`cmd=ld_lat_data`): 
 current time minus `transc_r`, cached until the next accepted cue. `TwitchBroadcastLatency` anchors
 the server clock per fresh source using either `EXT-X-TWITCH-INFO:SERVER-TIME` or
 `EXT-X-SESSION-DATA` with `DATA-ID="SERVER-TIME"`. `TwitchNetworkClock` refreshes Media3's SNTP
-reference every 30 seconds while live playback is active. LTB adds only the change in that
+reference every 30 seconds while any player holds a live stream. LTB adds only the change in that
 network-to-device offset since its initial reference, preserving Twitch's original clock alignment
-while correcting subsequent device drift. Failed refreshes retain the last successful reference.
+while correcting subsequent device drift. An offset older than 60 s counts as unavailable. A
+source anchored without a current offset takes its reference from the first refresh after the
+anchor. While no current offset is available, LTB keeps the last drift it applied.
 It rejects backwards receive/send timestamps.
 There is no buffer term or live-edge estimate in this readout. An unavailable or negative sample
 renders a dash. The older timeline-derived calculation is retained for chat synchronization only.
@@ -717,6 +719,20 @@ was installed September 9 at about 20:57 (PID 14170). All 30 app tests pass. Liv
 confirmed successful initial SNTP synchronization and subsequent 30-second refreshes correcting
 +2 ms then +1 ms; settled readings were about 0.49–0.50 s LTB with 0.40–0.44 s buffered.
 The runtime capture is `.tmp/ltb-browser/network-clock-runtime.log`.
+
+### Stale reference after idle (fixed 2026-11-08)
+
+Until `fix/ltb-stale-network-clock`, the offset never aged. Refreshes stopped whenever no live
+stream played, and the first live source after a long pause anchored on the offset from the end of
+the last session. Its first refresh then counted all the drift since that session, about
+160 ms per idle hour, as broadcast delay. The error stayed for the whole source. Reloading the
+stream re-anchored it on a current offset and cleared it. Example: November 8, 15:49–22:14 on
+`eun13`, after 14 h idle. LTB read buffer + 2.35 s while the stream was in sync with a browser tab
+showing 1.1 s. The first refresh had logged `changeMs=2229`. Every bad source from October 31 to
+November 8 began after such a pause, and the LTB excess matched the first refresh's `changeMs`:
+2334 (November 1), 1264 (November 2), 2028 (November 7) and 82 after a 30-minute pause
+(November 8, 01:18). `LTB-CUE` lines now log `refOffsetMs` and `driftMs`. `driftMs` stays near zero
+for a source's first minutes.
 
 
 ## Instrumentation
@@ -803,8 +819,10 @@ median cushion of 350 ms, a buffer of 465 ms, an LTB of 534 ms and 0.2 normal-de
 per hour. The build without the grace had 473 ms, 583 ms, 656 ms and 1.3 per hour.
 
 From 15:45 to 18:23 the LTB read about 2.3 s while the buffer (about 390 ms), `raw` (about
-1.17 s) and `edgeDist` (about 3.1 s) matched later sessions of the same channel. The extra
-latency came from outside the player; reloading the stream brought LTB back to about 0.5 s.
+1.17 s) and `edgeDist` (about 3.1 s) matched later sessions of the same channel. Reloading the
+stream brought LTB back to about 0.5 s. The extra 1.8 s was a misreading, not real latency: it was
+the stale clock reference after idle described in "Stale reference after idle" (the first refresh
+logged `changeMs=1875`).
 
 ### With `ll_target` at 0
 

@@ -19,6 +19,7 @@ final class TwitchBroadcastLatency {
 
     private final LongSupplier networkClockOffsetMs;
     private long networkReferenceOffsetMs = C.TIME_UNSET;
+    private long driftMs;
     private final LongSupplier elapsedRealtimeMs;
     private long serverTimeMs = C.TIME_UNSET;
     private long clockReferenceMs;
@@ -59,16 +60,17 @@ final class TwitchBroadcastLatency {
             serverTimeMs = timestamp;
             clockReferenceMs = elapsedRealtimeMs.getAsLong();
             networkReferenceOffsetMs = networkClockOffsetMs.getAsLong();
+            driftMs = 0;
             return;
         }
     }
 
     private long correctedTimeMs(long nowMs) {
         long offsetMs = networkClockOffsetMs.getAsLong();
-        if (networkReferenceOffsetMs == C.TIME_UNSET && offsetMs != C.TIME_UNSET) {
-            networkReferenceOffsetMs = offsetMs;
+        if (offsetMs != C.TIME_UNSET) {
+            if (networkReferenceOffsetMs == C.TIME_UNSET) networkReferenceOffsetMs = offsetMs;
+            driftMs = offsetMs - networkReferenceOffsetMs;
         }
-        long driftMs = offsetMs == C.TIME_UNSET || networkReferenceOffsetMs == C.TIME_UNSET ? 0 : offsetMs - networkReferenceOffsetMs;
         return serverTimeMs + (nowMs - clockReferenceMs) + driftMs;
     }
 
@@ -133,6 +135,7 @@ final class TwitchBroadcastLatency {
         long nowMs = elapsedRealtimeMs.getAsLong();
         return "receiveMs=" + receiveTimeMs + " sendMs=" + sendTimeMs +
             " correctedNowMs=" + correctedTimeMs(nowMs) +
+            " refOffsetMs=" + networkReferenceOffsetMs + " driftMs=" + driftMs +
             " wallNowMs=" + System.currentTimeMillis();
     }
 

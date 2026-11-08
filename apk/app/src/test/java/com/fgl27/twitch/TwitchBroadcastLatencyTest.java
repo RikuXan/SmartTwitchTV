@@ -216,6 +216,44 @@ public class TwitchBroadcastLatencyTest {
         assertEquals(600, tracked.getLatencyMs());
     }
 
+    @Test
+    public void unavailableNetworkClockKeepsLastDrift() {
+        AtomicLong networkOffset = new AtomicLong(95000);
+        TwitchBroadcastLatency tracked = new TwitchBroadcastLatency(clock::get, networkOffset::get);
+        tracked.synchronize(Collections.singletonList("#EXT-X-TWITCH-INFO:SERVER-TIME=\"100\""));
+        clock.addAndGet(1000);
+        networkOffset.addAndGet(100);
+        tracked.onMetadata(cue(100500, 100900));
+        assertEquals(600, tracked.getLatencyMs());
+        networkOffset.set(C.TIME_UNSET);
+        tracked.onMetadata(cue(100500, 100900));
+        assertEquals(600, tracked.getLatencyMs());
+        networkOffset.set(95150);
+        tracked.onMetadata(cue(100500, 100900));
+        assertEquals(650, tracked.getLatencyMs());
+    }
+
+    @Test
+    public void sourceStartedAfterIdleIgnoresDriftFromBeforeItsAnchor() {
+        long idleMs = 14 * 3600 * 1000L;
+        long idleDriftMs = 2229;
+        AtomicLong networkOffset = new AtomicLong(95000);
+        AtomicLong refreshedAt = new AtomicLong(clock.get());
+        TwitchBroadcastLatency tracked = new TwitchBroadcastLatency(
+            clock::get,
+            () -> TwitchNetworkClock.currentOffsetMs(networkOffset.get(), refreshedAt.get(), clock.get())
+        );
+        long serverNowMs = clock.get() + networkOffset.get() + idleMs;
+        clock.addAndGet(idleMs - idleDriftMs);
+        tracked.synchronize(Collections.singletonList("#EXT-X-TWITCH-INFO:SERVER-TIME=\"" + serverNowMs / 1000.0 + "\""));
+        clock.addAndGet(500);
+        serverNowMs += 500;
+        networkOffset.addAndGet(idleDriftMs);
+        refreshedAt.set(clock.get());
+        assertTrue(tracked.onMetadata(cue(serverNowMs - 720, serverNowMs - 650)));
+        assertEquals(720, tracked.getLatencyMs());
+    }
+
     private void synchronize(String serverTime) {
         latency.synchronize(Collections.singletonList("#EXT-X-SESSION-DATA:DATA-ID=\"SERVER-TIME\",VALUE=\"" + serverTime + "\""));
     }
