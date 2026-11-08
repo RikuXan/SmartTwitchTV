@@ -9,12 +9,26 @@ import java.io.IOException;
 final class TwitchNetworkClock {
 
     private static final long REFRESH_INTERVAL_MS = 30000;
-    private static volatile long offsetMs = C.TIME_UNSET;
+    static final long MAX_OFFSET_AGE_MS = 2 * REFRESH_INTERVAL_MS;
+    private static long offsetMs = C.TIME_UNSET;
+    private static long refreshedAtMs = C.TIME_UNSET;
     private static long lastAttemptMs = C.TIME_UNSET;
     private static Loader loader;
 
-    static long getOffsetMs() {
-        return offsetMs;
+    static synchronized long getOffsetMs() {
+        return currentOffsetMs(offsetMs, refreshedAtMs, SystemClock.elapsedRealtime());
+    }
+
+    //An old offset must read as unset: a source anchored on it would show the drift since then as latency.
+    static long currentOffsetMs(long offsetMs, long refreshedAtMs, long nowMs) {
+        return refreshedAtMs != C.TIME_UNSET && nowMs - refreshedAtMs <= MAX_OFFSET_AGE_MS ? offsetMs : C.TIME_UNSET;
+    }
+
+    private static synchronized void update(long refreshedOffsetMs) {
+        long changeMs = offsetMs == C.TIME_UNSET ? 0 : refreshedOffsetMs - offsetMs;
+        offsetMs = refreshedOffsetMs;
+        refreshedAtMs = SystemClock.elapsedRealtime();
+        TwitchDiagnosticLog.i("LTB-CLOCK-REFRESH offsetMs=" + offsetMs + " changeMs=" + changeMs);
     }
 
     static void refreshIfDue() {
@@ -31,10 +45,7 @@ final class TwitchNetworkClock {
             @Override
             public void onInitialized() {
                 long refreshedOffsetMs = SntpClient.getElapsedRealtimeOffsetMs();
-                if (refreshedOffsetMs == C.TIME_UNSET) return;
-                long changeMs = offsetMs == C.TIME_UNSET ? 0 : refreshedOffsetMs - offsetMs;
-                offsetMs = refreshedOffsetMs;
-                TwitchDiagnosticLog.i("LTB-CLOCK-REFRESH offsetMs=" + offsetMs + " changeMs=" + changeMs);
+                if (refreshedOffsetMs != C.TIME_UNSET) update(refreshedOffsetMs);
             }
 
             @Override
